@@ -689,13 +689,17 @@ function startInstallerSession(): void
     ini_set('session.use_strict_mode', '1');
     ini_set('session.use_only_cookies', '1');
     session_name('srp_installer');
-    session_set_cookie_params([
-        'lifetime' => 0,
-        'path' => '/',
-        'secure' => isSecure(),
-        'httponly' => true,
-        'samesite' => 'Strict',
-    ]);
+    if (PHP_VERSION_ID >= 70300) {
+        session_set_cookie_params([
+            'lifetime' => 0,
+            'path' => '/',
+            'secure' => isSecure(),
+            'httponly' => true,
+            'samesite' => 'Strict',
+        ]);
+    } else {
+        session_set_cookie_params(0, '/; SameSite=Strict', '', isSecure(), true);
+    }
     session_start();
     if (!isset($_SESSION[STATE_KEY]['boot'])) {
         session_regenerate_id(true);
