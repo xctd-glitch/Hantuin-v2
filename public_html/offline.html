@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#111827">
+    <meta name="color-scheme" content="light">
+    <link rel="icon" type="image/svg+xml" href="/assets/icons/icon.svg">
+    <title>Offline — Smart Redirect Platform</title>
+
+    <!--
+        /assets/style.css is pre-cached by the service worker (CORE_ASSETS).
+        It is safe to link here — it will load from cache even when offline.
+    -->
+    <link rel="stylesheet" href="/assets/style.css">
+
+    <style>
+        /* ── Page-level layout ─────────────────────────────────────────────
+           style.css provides: variables, .btn-*, .card, .input, .badge, etc.
+           We only declare structural rules that are unique to this page.
+        ────────────────────────────────────────────────────────────────── */
+
+        body {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            background-color: var(--page-bg);
+            color: hsl(240 10% 3.9%);
+        }
+
+        /* Header */
+        .offline-header {
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            border-bottom: 1px solid var(--border-color);
+            background-color: rgba(255, 255, 255, .95);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+        }
+        .offline-header-inner {
+            max-width: 64rem;
+            margin: 0 auto;
+            padding: 0 1.25rem;
+            height: 3rem;
+            display: flex;
+            align-items: center;
+        }
+        .offline-brand {
+            display: flex;
+            align-items: center;
+            gap: .5rem;
+        }
+        .offline-brand img {
+            width: 1.25rem;
+            height: 1.25rem;
+            flex-shrink: 0;
+        }
+        .offline-brand-name {
+            font-size: .875rem;
+            font-weight: 600;
+            letter-spacing: -.015em;
+            line-height: 1.2;
+        }
+        .offline-brand-sub {
+            font-size: .6875rem;
+            color: var(--muted-foreground);
+            line-height: 1.2;
+        }
+
+        /* Main area */
+        main {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1.25rem;
+        }
+        .offline-card {
+            width: 100%;
+            max-width: 22rem;
+            padding: 1.75rem;
+            text-align: center;
+        }
+
+        /* Icon ring */
+        .icon-ring {
+            width: 3.25rem;
+            height: 3.25rem;
+            margin: 0 auto 1.125rem;
+            border-radius: 50%;
+            border: 1px solid hsl(152 55% 82%);
+            background: hsl(152 55% 96%);
+            color: hsl(152 55% 36%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        /* Status pill */
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: .375rem;
+            border-radius: 9999px;
+            border: 1px solid hsl(152 55% 78%);
+            background: hsl(152 55% 96%);
+            color: hsl(152 55% 32%);
+            font-size: .6875rem;
+            font-weight: 500;
+            padding: .25rem .75rem;
+            margin-bottom: 1.125rem;
+        }
+        .status-dot {
+            width: .375rem;
+            height: .375rem;
+            border-radius: 50%;
+            background: hsl(152 55% 42%);
+            animation: blink 1.8s ease-in-out infinite;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: .25; }
+        }
+
+        /* Typography */
+        .offline-title {
+            font-size: 1rem;
+            font-weight: 600;
+            letter-spacing: -.015em;
+            margin-bottom: .375rem;
+        }
+        .offline-desc {
+            font-size: .8125rem;
+            color: var(--muted-foreground);
+            line-height: 1.65;
+            margin-bottom: 1.375rem;
+        }
+
+        /* Button stack */
+        .btn-stack {
+            display: flex;
+            flex-direction: column;
+            gap: .5rem;
+        }
+
+        /* Footer */
+        .offline-footer {
+            border-top: 1px solid var(--border-color);
+            padding: 1rem 1.25rem;
+        }
+        .offline-footer-inner {
+            max-width: 64rem;
+            margin: 0 auto;
+            text-align: center;
+            font-size: .6875rem;
+            color: var(--muted-foreground);
+        }
+    </style>
+</head>
+<body>
+
+<!-- Header — mirrors login.view.php -->
+<header class="offline-header">
+    <div class="offline-header-inner">
+        <div class="offline-brand">
+            <img src="/assets/icons/fox-head.png" alt="Ghost logo" width="20" height="20">
+            <div>
+                <div class="offline-brand-name">Smart Redirect Platform</div>
+                <div class="offline-brand-sub">No "smart" buzzword without actual routing logic.</div>
+            </div>
+        </div>
+    </div>
+</header>
+
+<!-- Main content -->
+<main>
+    <div class="card offline-card">
+
+        <!-- Wifi-off icon ring -->
+        <div class="icon-ring">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="1.75"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="1" y1="1" x2="23" y2="23"/>
+                <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/>
+                <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/>
+                <path d="M10.71 5.05A16 16 0 0 1 22.56 9"/>
+                <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/>
+                <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+                <circle cx="12" cy="20" r="1" fill="currentColor" stroke="none"/>
+            </svg>
+        </div>
+
+        <!-- Status pill -->
+        <div class="status-pill">
+            <span class="status-dot" aria-hidden="true"></span>
+            No internet connection
+        </div>
+
+        <p class="offline-title">You're offline</p>
+        <p class="offline-desc">
+            Koneksi internet kamu terputus.<br>
+            Coba reconnect, lalu refresh halaman.
+        </p>
+
+        <div class="btn-stack">
+            <button type="button" class="btn btn-default btn-default-size" onclick="retryOnline()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2.2"
+                     stroke-linecap="round" stroke-linejoin="round"
+                     aria-hidden="true" style="margin-right:.375rem;flex-shrink:0;">
+                    <polyline points="23 4 23 10 17 10"/>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                </svg>
+                Retry connection
+            </button>
+            <a href="/" class="btn btn-outline btn-default-size">← Back to home</a>
+        </div>
+
+    </div>
+</main>
+
+<!-- Footer — mirrors footer.php -->
+<footer class="offline-footer">
+    <div class="offline-footer-inner">
+        &copy; <span id="yr"></span> SRP Control. All rights reserved.
+    </div>
+</footer>
+
+<script>
+    document.getElementById('yr').textContent = new Date().getFullYear();
+
+    function retryOnline() {
+        window.location.reload();
+    }
+
+    // Auto-reload the moment the browser detects connection is restored
+    window.addEventListener('online', function () {
+        window.location.reload();
+    });
+</script>
+
+<script>
+document.addEventListener('contextmenu', function (e) {
+    var tag = e.target.tagName.toLowerCase();
+    if (tag === 'img' || tag === 'svg' || tag === 'use' || tag === 'path' ||
+        tag === 'circle' || tag === 'rect' || tag === 'line' || tag === 'polyline' ||
+        tag === 'polygon' || tag === 'ellipse') {
+        e.preventDefault();
+    }
+    if (e.target.closest && e.target.closest('svg')) {
+        e.preventDefault();
+    }
+});
+</script>
+</body>
+</html>

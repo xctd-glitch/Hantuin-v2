@@ -1,0 +1,981 @@
+<?php
+// phpcs:ignoreFile -- Installer entrypoint intentionally mixes bootstrap logic with inline HTML, CSS, and JS.
+declare(strict_types=1);
+
+define('ROOT', dirname(__DIR__));
+define('LOCK_FILE', ROOT . '/.installed');
+const STATE_KEY = 'srp_installer';
+const CSRF_KEY = 'srp_installer_csrf';
+
+startInstallerSession();
+$nonce = createNonce();
+sendSecurityHeaders($nonce);
+
+$method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+$action = $method === 'POST' ? normalizeAction($_POST['action'] ?? null) : '';
+
+if ($action !== '') {
+    handleAction($action);
+}
+
+$state = installerState();
+if (is_file(LOCK_FILE) && !$state['completed']) {
+    redirect('/login.php');
+}
+
+$boot = [
+    'csrf' => ensureCsrfToken(),
+    'completed' => is_file(LOCK_FILE) && $state['completed'],
+    'apiKey' => $state['api_key'] !== '' ? $state['api_key'] : readEnvValue('SRP_API_KEY'),
+    'crons' => $state['crons'] !== [] ? $state['crons'] : cronLines(),
+];
+$bootJson = json_encode($boot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES);
+if ($bootJson === false) {
+    $bootJson = '{"csrf":"","completed":false,"apiKey":"","crons":[]}';
+}
+
+$dbHost = $state['db']['host'] !== '' ? $state['db']['host'] : fallbackEnv('SRP_DB_HOST', '127.0.0.1');
+$dbPort = $state['db']['port'] !== '' ? $state['db']['port'] : fallbackEnv('SRP_DB_PORT', '3306');
+$dbName = $state['db']['name'] !== '' ? $state['db']['name'] : fallbackEnv('SRP_DB_NAME', 'srp');
+$dbUser = $state['db']['user'] !== '' ? $state['db']['user'] : fallbackEnv('SRP_DB_USER', '');
+$adminUser = $state['admin']['user'] !== '' ? $state['admin']['user'] : fallbackEnv('SRP_ADMIN_USER', 'admin');
+$apiKey = $state['api_key'] !== '' ? $state['api_key'] : readEnvValue('SRP_API_KEY');
+
+function handleAction(string $action): never
+{
+    if (!hash_equals(ensureCsrfToken(), (string)($_POST['tok'] ?? ''))) {
+        json(['ok' => false, 'error' => 'CSRF token tidak valid. Muat ulang installer.'], 403);
+    }
+
+    $state = installerState();
+    $locked = is_file(LOCK_FILE);
+    if ($locked && (!$state['completed'] || $action !== 'delete_self')) {
+        json(['ok' => false, 'error' => 'Installer sudah dikunci.'], 423);
+    }
+
+    if ($action === 'check_reqs') {
+        json(checkRequirements());
+    }
+
+    if ($action === 'test_db') {
+        $db = validateDb($_POST);
+        ensureDatabaseReady($db);
+        json(['ok' => true, 'message' => sprintf('Koneksi ke `%s` berhasil.', $db['name'])]);
+    }
+
+    if ($action === 'save_db') {
+        $_SESSION[STATE_KEY]['db'] = validateDb($_POST);
+        json(['ok' => true]);
+    }
+
+    if ($action === 'save_admin') {
+        $admin = validateAdmin($_POST);
+        $hash = password_hash($admin['password'], PASSWORD_DEFAULT);
+        $_SESSION[STATE_KEY]['admin'] = ['user' => $admin['user'], 'hash' => $hash];
+        $_SESSION[STATE_KEY]['api_key'] = $admin['api_key'];
+        $_SESSION[STATE_KEY]['app_url'] = $admin['app_url'];
+        json(['ok' => true, 'api_key' => $admin['api_key']]);
+    }
+
+    if ($action === 'run_install') {
+        runInstall($state);
+    }
+
+    if ($action === 'delete_self') {
+        if (!$state['completed']) {
+            json(['ok' => false, 'error' => 'Installer hanya boleh dihapus setelah instalasi selesai.'], 409);
+        }
+        if (!unlink(__FILE__)) {
+            json(['ok' => false, 'error' => 'Gagal menghapus install.php. Hapus manual.'], 500);
+        }
+        unset($_SESSION[STATE_KEY], $_SESSION[CSRF_KEY]);
+        json(['ok' => true]);
+    }
+
+    json(['ok' => false, 'error' => 'Aksi installer tidak dikenal.'], 400);
+}
+
+/**
+ * @param array{
+ *     db: array{host:string,port:string,name:string,user:string},
+ *     admin: array{user:string,hash:string},
+ *     api_key:string,
+ *     app_url:string,
+ *     completed:bool,
+ *     crons:list<string>
+ * } $state
+ */
+function runInstall(array $state): never
+{
+    if ($state['db']['host'] === '' || $state['db']['user'] === '' || $state['admin']['user'] === '' || $state['admin']['hash'] === '') {
+        json(['ok' => false, 'error' => 'Step database atau admin belum lengkap.'], 409);
+    }
+
+    $db = [
+        'host' => $state['db']['host'],
+        'port' => (int) $state['db']['port'],
+        'name' => $state['db']['name'],
+        'user' => $state['db']['user'],
+        'pass' => (string) ($_SESSION[STATE_KEY]['db']['pass'] ?? ''),
+    ];
+    $admin = [
+        'user'    => $state['admin']['user'],
+        'hash'    => $state['admin']['hash'],
+        'api_key' => $state['api_key'],
+        'app_url' => $state['app_url'],
+    ];
+    $log = [];
+    $ok = true;
+
+    try {
+        writeEnv($db, $admin);
+        $log[] = ['ok' => true, 'msg' => '.env berhasil ditulis.'];
+    } catch (Throwable $e) {
+        $log[] = ['ok' => false, 'msg' => '.env gagal ditulis.'];
+        $ok = false;
+    }
+
+    try {
+        ensureDatabaseReady($db);
+        applySchema(connectPdo($db, true));
+        $log[] = ['ok' => true, 'msg' => 'Schema database diterapkan via PDO tanpa multi-statement.'];
+    } catch (Throwable $e) {
+        $log[] = ['ok' => false, 'msg' => 'Schema database gagal diterapkan.'];
+        $ok = false;
+    }
+
+    try {
+        sanitizeHtaccess();
+        ensureRuntimeDirs();
+        hardenPermissions();
+        $log[] = ['ok' => true, 'msg' => '.htaccess, direktori runtime, dan permission diperketat.'];
+    } catch (Throwable $e) {
+        $log[] = ['ok' => false, 'msg' => 'Hardening file system gagal.'];
+        $ok = false;
+    }
+
+    if ($ok) {
+        writeAtomic(LOCK_FILE, gmdate('c'), 0600);
+        session_regenerate_id(true);
+        $_SESSION[STATE_KEY]['completed'] = true;
+        $_SESSION[STATE_KEY]['crons'] = cronLines();
+        $_SESSION[STATE_KEY]['api_key'] = $admin['api_key'];
+        json(['ok' => true, 'log' => $log, 'api_key' => $admin['api_key'], 'crons' => $_SESSION[STATE_KEY]['crons']]);
+    }
+
+    json(['ok' => false, 'log' => $log, 'error' => 'Instalasi gagal.'], 500);
+}
+
+/**
+ * @return array{ok:bool,items:list<array{label:string,ok:bool,note:string,warn?:bool}>}
+ */
+function checkRequirements(): array
+{
+    $items = [];
+    $ok = true;
+    $phpOk = PHP_VERSION_ID >= 80300;
+    $items[] = ['label' => 'PHP ' . PHP_VERSION, 'ok' => $phpOk, 'note' => $phpOk ? '' : 'Wajib PHP 8.3+'];
+    if (!$phpOk) {
+        $ok = false;
+    }
+    foreach (['pdo', 'pdo_mysql', 'json', 'mbstring', 'openssl'] as $ext) {
+        $loaded = extension_loaded($ext);
+        $items[] = ['label' => 'ext/' . $ext, 'ok' => $loaded, 'note' => $loaded ? '' : 'Extension wajib aktif'];
+        if (!$loaded) {
+            $ok = false;
+        }
+    }
+    $writable = is_writable(ROOT);
+    $items[] = ['label' => 'Project root writable', 'ok' => $writable, 'note' => $writable ? '' : 'Installer butuh izin tulis'];
+    if (!$writable) {
+        $ok = false;
+    }
+    foreach (['.env.example', 'public_html/.htaccess', 'src/bootstrap.php', 'src/Config/Database.php'] as $file) {
+        $exists = is_file(ROOT . '/' . $file);
+        $items[] = ['label' => $file, 'ok' => $exists, 'note' => $exists ? '' : 'File wajib ada'];
+        if (!$exists) {
+            $ok = false;
+        }
+    }
+    if (is_file(ROOT . '/.env')) {
+        $items[] = ['label' => '.env sudah ada', 'ok' => true, 'warn' => true, 'note' => 'Akan ditimpa saat install'];
+    }
+    return ['ok' => $ok, 'items' => $items];
+}
+
+/**
+ * @param array<string, mixed> $source
+ * @return array{host:string,port:int,name:string,user:string,pass:string}
+ */
+function validateDb(array $source): array
+{
+    $host = trim(readStringField($source, 'db_host'));
+    $port = filter_var($source['db_port'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 65535]]);
+    $name = trim(readStringField($source, 'db_name'));
+    $user = trim(readStringField($source, 'db_user'));
+    $pass = readStringField($source, 'db_pass');
+
+    if ($host === '' || strlen($host) > 255 || preg_match('/\A[a-zA-Z0-9.\-:\[\]]{1,255}\z/', $host) !== 1) {
+        json(['ok' => false, 'error' => 'DB host tidak valid.'], 422);
+    }
+    if ($port === false) {
+        json(['ok' => false, 'error' => 'Port database harus 1-65535.'], 422);
+    }
+    if ($name === '' || strlen($name) > 64 || preg_match('/\A[A-Za-z0-9_]{1,64}\z/', $name) !== 1) {
+        json(['ok' => false, 'error' => 'Nama database harus alfanumerik/underscore, max 64 karakter.'], 422);
+    }
+    if ($user === '' || !isPrintable($user) || strlen($user) > 128) {
+        json(['ok' => false, 'error' => 'Username database tidak valid.'], 422);
+    }
+    if (!isPrintable($pass) || strlen($pass) > 255) {
+        json(['ok' => false, 'error' => 'Password database tidak valid.'], 422);
+    }
+
+    return ['host' => $host, 'port' => (int) $port, 'name' => $name, 'user' => $user, 'pass' => $pass];
+}
+
+/**
+ * @param array<string, mixed> $source
+ * @return array{user:string,password:string,api_key:string,app_url:string}
+ */
+function validateAdmin(array $source): array
+{
+    $user = trim(readStringField($source, 'admin_user'));
+    $password = readStringField($source, 'admin_pass');
+    $apiKey = strtolower(trim(readStringField($source, 'api_key')));
+    $appUrl = trim(readStringField($source, 'app_url'));
+
+    if ($user === '' || strlen($user) < 3 || strlen($user) > 64 || preg_match('/\A[A-Za-z0-9._-]{3,64}\z/', $user) !== 1) {
+        json(['ok' => false, 'error' => 'Username admin tidak valid.'], 422);
+    }
+    if (
+        strlen($password) < 8
+        || strlen($password) > 255
+        || !isPrintable($password)
+        || preg_match('/[a-z]/', $password) !== 1
+        || preg_match('/[0-9]/', $password) !== 1
+    ) {
+        json(['ok' => false, 'error' => 'Password admin minimal 8 karakter dan wajib mengandung huruf kecil dan angka.'], 422);
+    }
+    if ($apiKey === '') {
+        $apiKey = bin2hex(random_bytes(32));
+    }
+    if (preg_match('/\A[a-f0-9]{64}\z/', $apiKey) !== 1) {
+        json(['ok' => false, 'error' => 'API key harus 64 karakter hex.'], 422);
+    }
+    if ($appUrl !== '' && filter_var($appUrl, FILTER_VALIDATE_URL) === false) {
+        json(['ok' => false, 'error' => 'Application URL tidak valid.'], 422);
+    }
+
+    return ['user' => $user, 'password' => $password, 'api_key' => $apiKey, 'app_url' => $appUrl];
+}
+
+/**
+ * @param array{host:string,port:int,name:string,user:string,pass:string} $db
+ */
+function ensureDatabaseReady(array $db): void
+{
+    $pdo = connectPdo($db, false);
+    $pdo->exec('CREATE DATABASE IF NOT EXISTS ' . quoteIdentifier($db['name']) . ' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
+    connectPdo($db, true)->query('SELECT 1');
+}
+
+/**
+ * @param array{host:string,port:int,name:string,user:string,pass:string} $db
+ */
+function connectPdo(array $db, bool $withDb): PDO
+{
+    $dsn = 'mysql:host=' . $db['host'] . ';port=' . (string) $db['port'] . ';charset=utf8mb4';
+    if ($withDb) {
+        $dsn .= ';dbname=' . $db['name'];
+    }
+    $options = [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false,
+    ];
+    if (defined('PDO::MYSQL_ATTR_MULTI_STATEMENTS')) {
+        $options[PDO::MYSQL_ATTR_MULTI_STATEMENTS] = false;
+    }
+    return new PDO($dsn, $db['user'], $db['pass'], $options);
+}
+
+function applySchema(PDO $pdo): void
+{
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `settings` (`id` TINYINT UNSIGNED NOT NULL, `redirect_url` VARCHAR(2048) NOT NULL DEFAULT '', `system_on` TINYINT(1) NOT NULL DEFAULT 0, `country_filter_mode` ENUM('all','whitelist','blacklist') NOT NULL DEFAULT 'all', `country_filter_list` TEXT NOT NULL, `postback_url` VARCHAR(2048) NOT NULL DEFAULT '', `postback_token` VARCHAR(64) NOT NULL DEFAULT '', `updated_at` INT UNSIGNED NOT NULL DEFAULT 0, PRIMARY KEY (`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `logs` (`id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, `ts` INT UNSIGNED NOT NULL, `ip` VARCHAR(45) NOT NULL, `ua` VARCHAR(500) NOT NULL, `click_id` VARCHAR(100) DEFAULT NULL, `country_code` VARCHAR(10) DEFAULT NULL, `user_lp` VARCHAR(100) DEFAULT NULL, `decision` ENUM('A','B') NOT NULL, PRIMARY KEY (`id`), INDEX `idx_logs_ts_dec` (`ts`, `decision`), INDEX `idx_logs_cc_ts` (`country_code`, `ts`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `conversions` (`id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, `ts` INT UNSIGNED NOT NULL, `click_id` VARCHAR(100) NOT NULL DEFAULT '', `payout` DECIMAL(10,4) NOT NULL DEFAULT 0.0000, `currency` VARCHAR(10) NOT NULL DEFAULT 'USD', `status` VARCHAR(50) NOT NULL DEFAULT 'approved', `country` VARCHAR(10) DEFAULT NULL, `ip` VARCHAR(45) NOT NULL DEFAULT '', `raw` TEXT NOT NULL, PRIMARY KEY (`id`), INDEX `idx_conv_ts` (`ts`), INDEX `idx_conv_click_id` (`click_id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    if (!columnExists($pdo, 'settings', 'postback_url')) {
+        $pdo->exec("ALTER TABLE `settings` ADD COLUMN `postback_url` VARCHAR(2048) NOT NULL DEFAULT '' AFTER `country_filter_list`");
+    }
+    if (!columnExists($pdo, 'settings', 'postback_token')) {
+        $pdo->exec("ALTER TABLE `settings` ADD COLUMN `postback_token` VARCHAR(64) NOT NULL DEFAULT '' AFTER `postback_url`");
+    }
+    if (!columnExists($pdo, 'conversions', 'country')) {
+        $pdo->exec("ALTER TABLE `conversions` ADD COLUMN `country` VARCHAR(10) DEFAULT NULL AFTER `status`");
+    }
+    if (!indexExists($pdo, 'logs', 'idx_logs_ts_dec')) {
+        $pdo->exec('ALTER TABLE `logs` ADD INDEX `idx_logs_ts_dec` (`ts`, `decision`)');
+    }
+    if (indexExists($pdo, 'logs', 'idx_logs_ts')) {
+        $pdo->exec('ALTER TABLE `logs` DROP INDEX `idx_logs_ts`');
+    }
+    $stmt = $pdo->prepare("INSERT INTO `settings` (`id`,`redirect_url`,`system_on`,`country_filter_mode`,`country_filter_list`,`postback_url`,`postback_token`,`updated_at`) VALUES (:id,:redirect_url,:system_on,:country_filter_mode,:country_filter_list,:postback_url,:postback_token,UNIX_TIMESTAMP()) ON DUPLICATE KEY UPDATE `id`=`id`");
+    $stmt->execute([
+        ':id' => 1,
+        ':redirect_url' => '',
+        ':system_on' => 0,
+        ':country_filter_mode' => 'all',
+        ':country_filter_list' => '',
+        ':postback_url' => '',
+        ':postback_token' => '',
+    ]);
+}
+
+function columnExists(PDO $pdo, string $table, string $column): bool
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name');
+    $stmt->execute([':table_name' => $table, ':column_name' => $column]);
+    return (int) $stmt->fetchColumn() > 0;
+}
+
+function indexExists(PDO $pdo, string $table, string $index): bool
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND INDEX_NAME = :index_name');
+    $stmt->execute([':table_name' => $table, ':index_name' => $index]);
+    return (int) $stmt->fetchColumn() > 0;
+}
+
+/**
+ * @param array{host:string,port:int,name:string,user:string,pass:string} $db
+ * @param array{user:string,hash:string,api_key:string,app_url:string} $admin
+ */
+function writeEnv(array $db, array $admin): void
+{
+    $lines = [
+        '# ===================================================================',
+        '# Hantuin-v2 Environment Configuration',
+        '# Last updated: ' . date('Y-m-d H:i:s'),
+        '# ===================================================================',
+        '',
+        '# ── Application ────────────────────────────────────────────────────',
+        'APP_URL=' . envValue($admin['app_url']),
+        'APP_ENV=production',
+        'APP_DEBUG=false',
+        'SRP_ENV=production',
+        'SRP_ENV_FILE=',
+        '',
+        '# ── Database ───────────────────────────────────────────────────────',
+        'SRP_DB_HOST=' . envValue($db['host']),
+        'SRP_DB_PORT=' . (string) $db['port'],
+        'SRP_DB_NAME=' . envValue($db['name']),
+        'SRP_DB_USER=' . envValue($db['user']),
+        'SRP_DB_PASS=' . envValue($db['pass']),
+        'SRP_DB_SOCKET=',
+        '',
+        '# ── API Keys ───────────────────────────────────────────────────────',
+        'SRP_API_KEY=' . envValue($admin['api_key']),
+        '',
+        '# Remote Decision Server (S2S)',
+        'SRP_REMOTE_DECISION_URL=',
+        'SRP_REMOTE_API_KEY=',
+        '',
+        '# ── API Client Tuning ──────────────────────────────────────────────',
+        'SRP_API_TIMEOUT=8',
+        'SRP_API_CONNECT_TIMEOUT=3',
+        'SRP_API_FAILURE_COOLDOWN=30',
+        'SRP_API_MAX_RETRIES=0',
+        'SRP_API_BACKOFF_BASE_MS=250',
+        'SRP_API_BACKOFF_MAX_MS=1500',
+        'SRP_API_RESPONSE_CACHE_SECONDS=3',
+        'SRP_API_INFLIGHT_WAIT_MS=300',
+        '',
+        '# ── VPN Check ─────────────────────────────────────────────────────',
+        'SRP_VPN_CHECK_ENABLED=1',
+        '',
+        '# ── Rate Limiting ──────────────────────────────────────────────────',
+        'SRP_PUBLIC_API_RATE_WINDOW=60',
+        'SRP_PUBLIC_API_RATE_MAX=1000',
+        'SRP_PUBLIC_API_RATE_HEAVY_MAX=30',
+        'RATE_LIMIT_ATTEMPTS=5',
+        'RATE_LIMIT_WINDOW=900',
+        '',
+        '# ── Admin Credentials ──────────────────────────────────────────────',
+        'SRP_ADMIN_USER=' . envValue($admin['user']),
+        'SRP_ADMIN_PASSWORD_HASH=' . envValue($admin['hash']),
+        'SRP_ADMIN_PASSWORD=',
+        '',
+        'SRP_USER_USER=',
+        'SRP_USER_PASSWORD_HASH=',
+        'SRP_USER_PASSWORD=',
+        '',
+        '# ── Security ───────────────────────────────────────────────────────',
+        'SRP_TRUSTED_PROXIES=',
+        'SRP_FORCE_SECURE_COOKIES=true',
+        '',
+        '# ── Cache ──────────────────────────────────────────────────────────',
+        'CACHE_DRIVER=',
+        'CACHE_PREFIX=srp_',
+        'REDIS_HOST=127.0.0.1',
+        'REDIS_PORT=6379',
+        'REDIS_PASSWORD=',
+        'REDIS_DB=0',
+        'MEMCACHED_HOST=127.0.0.1',
+        'MEMCACHED_PORT=11211',
+        '',
+        '# ── Session ────────────────────────────────────────────────────────',
+        'SESSION_LIFETIME=3600',
+    ];
+    writeAtomic(ROOT . '/.env', implode(PHP_EOL, $lines), 0600);
+}
+
+function sanitizeHtaccess(): void
+{
+    $target = ROOT . '/public_html/.htaccess';
+    $content = file_get_contents($target);
+    if ($content === false) {
+        throw new PDOException('Gagal membaca .htaccess publik.');
+    }
+    $content = preg_replace('/<IfModule\s+mod_env\.c>[\s\S]*?<\/IfModule>\s*/i', '', $content);
+    $content = preg_replace('/^\s*Header\s+always\s+set\s+X-XSS-Protection.*$\R?/mi', '', (string) $content);
+    if ($content === null) {
+        throw new PDOException('Gagal membersihkan .htaccess.');
+    }
+    writeAtomic($target, trim($content), 0644);
+}
+
+function ensureRuntimeDirs(): void
+{
+    foreach ([ROOT . '/logs', ROOT . '/backups', ROOT . '/storage', ROOT . '/storage/tmp'] as $dir) {
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            throw new PDOException('Gagal membuat direktori runtime.');
+        }
+    }
+    $deny = "<IfModule mod_authz_core.c>\n    Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n    Order deny,allow\n    Deny from all\n</IfModule>";
+    foreach (['cron', 'src', 'logs', 'backups', 'storage'] as $dir) {
+        if (is_dir(ROOT . '/' . $dir)) {
+            writeAtomic(ROOT . '/' . $dir . '/.htaccess', $deny, 0644);
+        }
+    }
+}
+
+function hardenPermissions(): void
+{
+    foreach ([ROOT . '/src', ROOT . '/public_html'] as $dir) {
+        if (!is_dir($dir)) {
+            continue;
+        }
+        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS));
+        foreach ($it as $file) {
+            if (!$file instanceof SplFileInfo) {
+                continue;
+            }
+            if ($file->isFile() && strtolower($file->getExtension()) === 'php') {
+                chmod($file->getPathname(), 0644);
+            }
+        }
+    }
+    foreach (glob(ROOT . '/cron/*.php') ?: [] as $file) {
+        chmod($file, 0750);
+    }
+    foreach ([ROOT . '/.env', ROOT . '/schema.sql', ROOT . '/entry.php'] as $file) {
+        if (is_file($file)) {
+            chmod($file, $file === ROOT . '/.env' ? 0600 : 0644);
+        }
+    }
+}
+
+function writeAtomic(string $path, string $content, int $mode): void
+{
+    $tmp = $path . '.tmp-' . bin2hex(random_bytes(6));
+    if (file_put_contents($tmp, $content . PHP_EOL, LOCK_EX) === false) {
+        throw new PDOException('Gagal menulis file sementara.');
+    }
+    if (is_file($path) && !unlink($path)) {
+        @unlink($tmp);
+        throw new PDOException('Gagal menimpa file target.');
+    }
+    if (!rename($tmp, $path)) {
+        @unlink($tmp);
+        throw new PDOException('Gagal memindahkan file sementara.');
+    }
+    if (!chmod($path, $mode)) {
+        throw new PDOException('Gagal mengatur permission file.');
+    }
+}
+
+function quoteIdentifier(string $value): string
+{
+    if (preg_match('/\A[A-Za-z0-9_]{1,64}\z/', $value) !== 1) {
+        throw new PDOException('Identifier database tidak valid.');
+    }
+    return '`' . $value . '`';
+}
+
+function envValue(string $value): string
+{
+    if (!isPrintable($value)) {
+        throw new PDOException('Nilai env tidak valid.');
+    }
+    return trim($value);
+}
+
+function isPrintable(string $value): bool
+{
+    return preg_match('/\A[^\x00-\x1F\x7F]*\z/u', $value) === 1;
+}
+
+/**
+ * @param array<string, mixed> $source
+ */
+function readStringField(array $source, string $key): string
+{
+    $value = $source[$key] ?? '';
+    if (!is_scalar($value) && $value !== null) {
+        json(['ok' => false, 'error' => 'Input installer tidak valid.'], 422);
+    }
+    return (string) $value;
+}
+
+/**
+ * @return array{
+ *     db: array{host:string,port:string,name:string,user:string},
+ *     admin: array{user:string,hash:string},
+ *     api_key:string,
+ *     app_url:string,
+ *     completed:bool,
+ *     crons:list<string>
+ * }
+ */
+function installerState(): array
+{
+    $stored = $_SESSION[STATE_KEY] ?? [];
+    return [
+        'db' => [
+            'host' => (string) ($stored['db']['host'] ?? ''),
+            'port' => (string) ($stored['db']['port'] ?? ''),
+            'name' => (string) ($stored['db']['name'] ?? ''),
+            'user' => (string) ($stored['db']['user'] ?? ''),
+        ],
+        'admin' => [
+            'user' => (string) ($stored['admin']['user'] ?? ''),
+            'hash' => (string) ($stored['admin']['hash'] ?? ''),
+        ],
+        'api_key' => (string) ($stored['api_key'] ?? ''),
+        'app_url' => (string) ($stored['app_url'] ?? ''),
+        'completed' => (bool) ($stored['completed'] ?? false),
+        'crons' => is_array($stored['crons'] ?? null) ? array_values($stored['crons']) : [],
+    ];
+}
+
+/**
+ * @return list<string>
+ */
+function cronLines(): array
+{
+    $php = cronQuote(PHP_BINARY);
+    $root = cronQuote(ROOT);
+    return [
+        '0 3 * * * ' . $php . ' ' . $root . '/cron/purge.php --log-days=7 --backup-days=30 >> ' . $root . '/logs/purge.log 2>&1',
+        '0 1 * * * ' . $php . ' ' . $root . '/cron/backup.php 30 >> ' . $root . '/logs/backup.log 2>&1',
+        '*/15 * * * * ' . $php . ' ' . $root . '/cron/health-check.php >> ' . $root . '/logs/health.log 2>&1',
+    ];
+}
+
+function cronQuote(string $value): string
+{
+    return preg_match('/[\s\'"`$\\\\]/', $value) === 1 ? "'" . str_replace("'", "'\"'\"'", $value) . "'" : $value;
+}
+
+function readEnvValue(string $key): string
+{
+    $path = ROOT . '/.env';
+    if (!is_readable($path)) {
+        return '';
+    }
+    $lines = file($path, FILE_IGNORE_NEW_LINES);
+    if ($lines === false) {
+        return '';
+    }
+    foreach ($lines as $line) {
+        if ($line === '' || str_starts_with(trim($line), '#')) {
+            continue;
+        }
+        [$k, $v] = array_pad(explode('=', $line, 2), 2, '');
+        if (trim($k) === $key) {
+            return trim($v);
+        }
+    }
+    return '';
+}
+
+function fallbackEnv(string $key, string $default): string
+{
+    $value = readEnvValue($key);
+    return $value === '' ? $default : $value;
+}
+
+function ensureCsrfToken(): string
+{
+    if (!isset($_SESSION[CSRF_KEY]) || !is_string($_SESSION[CSRF_KEY])) {
+        $_SESSION[CSRF_KEY] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION[CSRF_KEY];
+}
+
+function startInstallerSession(): void
+{
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        return;
+    }
+    ini_set('session.use_strict_mode', '1');
+    ini_set('session.use_only_cookies', '1');
+    session_name('srp_installer');
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'secure' => isSecure(),
+        'httponly' => true,
+        'samesite' => 'Strict',
+    ]);
+    session_start();
+    if (!isset($_SESSION[STATE_KEY]['boot'])) {
+        session_regenerate_id(true);
+        $_SESSION[STATE_KEY]['boot'] = true;
+    }
+}
+
+function sendSecurityHeaders(string $nonce): void
+{
+    if (function_exists('header_remove')) {
+        header_remove('X-Powered-By');
+    }
+    header('Content-Type: text/html; charset=UTF-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Pragma: no-cache');
+    header('X-Frame-Options: DENY');
+    header('X-Content-Type-Options: nosniff');
+    header('Referrer-Policy: no-referrer');
+    header('Permissions-Policy: accelerometer=(), camera=(), geolocation=(), gyroscope=(), microphone=(), payment=(), usb=()');
+    header("Content-Security-Policy: default-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; connect-src 'self'; img-src 'self' data:; script-src 'self' 'nonce-{$nonce}'; style-src 'self' 'unsafe-inline'");
+    if (isSecure()) {
+        header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+    }
+}
+
+function isSecure(): bool
+{
+    $https = strtolower((string) ($_SERVER['HTTPS'] ?? ''));
+    $proto = strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+    return $https === 'on' || $https === '1' || $proto === 'https' || (string) ($_SERVER['SERVER_PORT'] ?? '') === '443';
+}
+
+function createNonce(): string
+{
+    try {
+        return rtrim(strtr(base64_encode(random_bytes(16)), '+/', '-_'), '=');
+    } catch (Throwable $e) {
+        return 'static-installer-nonce';
+    }
+}
+
+function normalizeAction(mixed $value): string
+{
+    if (!is_scalar($value) && $value !== null) {
+        return '';
+    }
+    $action = trim((string) $value);
+    return preg_match('/\A[a-z_]{1,32}\z/', $action) === 1 ? $action : '';
+}
+
+function redirect(string $to): never
+{
+    header('Location: ' . $to, true, 302);
+    exit;
+}
+
+/**
+ * @param array<string, mixed> $payload
+ */
+function json(array $payload, int $status = 200): never
+{
+    http_response_code($status);
+    header('Content-Type: application/json; charset=UTF-8');
+    $encoded = json_encode($payload, JSON_UNESCAPED_SLASHES);
+    echo $encoded === false ? '{"ok":false,"error":"JSON encoding gagal."}' : $encoded;
+    exit;
+}
+
+function h(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+?><!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hantuin-v2 Installer</title>
+<style nonce="<?= h($nonce) ?>">
+body{margin:0;font:16px/1.5 "Segoe UI",Arial,sans-serif;background:#0f172a;color:#e2e8f0}main{max-width:860px;margin:0 auto;padding:24px}section,header{background:#111827;border:1px solid #334155;border-radius:18px;padding:20px;margin-bottom:18px}.card{background:#fff;color:#0f172a}.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}.field{margin-bottom:14px}.field label{display:block;font-size:13px;font-weight:700;color:#475569;margin-bottom:6px}.field input{width:100%;box-sizing:border-box;padding:12px 14px;border:1px solid #cbd5e1;border-radius:12px}.actions{display:flex;gap:12px;justify-content:space-between;align-items:center;flex-wrap:wrap}.btn{border:0;border-radius:999px;padding:12px 18px;font-weight:700;cursor:pointer;text-decoration:none;display:inline-block}.primary{background:#0f766e;color:#fff}.secondary{background:#ecfeff;color:#155e75}.danger{background:#fef2f2;color:#b91c1c}.link{background:transparent;color:#64748b;padding:0}.hidden{display:none!important}.step{display:none}.step.active{display:block}.status{display:none;padding:12px 14px;border-radius:12px;margin-top:10px;font-weight:600}.status.show{display:block}.ok{background:#f0fdf4;color:#166534}.err{background:#fef2f2;color:#b91c1c}.load{background:#eff6ff;color:#1d4ed8}.item{padding:12px 14px;border-radius:12px;border:1px solid #e2e8f0;margin-bottom:10px;background:#f8fafc}.item.ok{background:#f0fdf4}.item.err{background:#fef2f2}.item.warn{background:#fffbeb}.log{background:#020617;color:#cbd5e1;border-radius:14px;padding:14px;min-height:220px;font:13px/1.6 Consolas,monospace;white-space:pre-wrap}.pillbar{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:18px}.pill{padding:10px 12px;border-radius:999px;border:1px solid #334155;text-align:center;color:#94a3b8;font-size:13px}.pill.active{background:#ecfeff;color:#155e75;border-color:#0f766e}.pill.done{background:#0f766e;color:#fff;border-color:#0f766e}code,pre{font-family:Consolas,monospace}@media(max-width:700px){.row,.pillbar{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<h1 style="margin:0 0 8px">Hantuin-v2 Installer</h1>
+<p style="margin:0;color:#cbd5e1">Session aman, CSRF wajib, CSP nonce aktif, setup database via PDO tanpa multi-statement.</p>
+</header>
+
+<section class="card">
+<div class="pillbar">
+<div class="pill" data-pill="1">1. Requirements</div>
+<div class="pill" data-pill="2">2. Database</div>
+<div class="pill" data-pill="3">3. Admin</div>
+<div class="pill" data-pill="4">4. Install</div>
+<div class="pill" data-pill="5">5. Final</div>
+</div>
+
+<div class="step" id="step-1">
+<h2>Requirements</h2>
+<div id="req-list"></div>
+<div class="actions">
+<span id="req-note" style="color:#64748b">Requirement wajib harus lolos semua.</span>
+<div>
+<button class="btn secondary" type="button" id="req-refresh">Periksa ulang</button>
+<button class="btn primary" type="button" id="req-next" disabled>Lanjut</button>
+</div>
+</div>
+</div>
+
+<div class="step" id="step-2">
+<h2>Database</h2>
+<div class="row">
+<div class="field"><label for="db_host">DB host</label><input id="db_host" type="text" value="<?= h($dbHost) ?>" maxlength="255"></div>
+<div class="field"><label for="db_port">Port</label><input id="db_port" type="number" value="<?= h($dbPort) ?>" min="1" max="65535"></div>
+<div class="field"><label for="db_name">Database name</label><input id="db_name" type="text" value="<?= h($dbName) ?>" maxlength="64"></div>
+<div class="field"><label for="db_user">Database user</label><input id="db_user" type="text" value="<?= h($dbUser) ?>" maxlength="128"></div>
+</div>
+<div class="field"><label for="db_pass">Database password</label><input id="db_pass" type="password" maxlength="255"></div>
+<div class="status" id="db-status"></div>
+<div class="actions">
+<button class="btn link" type="button" data-step="1">Kembali</button>
+<div>
+<button class="btn secondary" type="button" id="db-test">Tes koneksi</button>
+<button class="btn primary" type="button" id="db-save">Simpan</button>
+</div>
+</div>
+</div>
+
+<div class="step" id="step-3">
+<h2>Admin</h2>
+<div class="field"><label for="admin_user">Username admin</label><input id="admin_user" type="text" value="<?= h($adminUser) ?>" maxlength="64"></div>
+<div class="field"><label for="admin_pass">Password admin</label><input id="admin_pass" type="password" maxlength="255"></div>
+<div class="field"><label for="admin_pass2">Ulangi password</label><input id="admin_pass2" type="password" maxlength="255"></div>
+<div class="field"><label for="api_key">API key opsional</label><input id="api_key" type="text" value="<?= h($apiKey) ?>" maxlength="64"></div>
+<div class="field"><label for="app_url">Application URL</label><input id="app_url" type="url" placeholder="https://trackng.us" maxlength="255"></div>
+<p id="pw-note" style="color:#64748b;margin-top:0">Minimal 8 karakter, wajib huruf kecil dan angka.</p>
+<div class="status" id="admin-status"></div>
+<div class="actions">
+<button class="btn link" type="button" data-step="2">Kembali</button>
+<div>
+<button class="btn secondary" type="button" id="api-generate">Generate API key</button>
+<button class="btn primary" type="button" id="admin-save">Simpan</button>
+</div>
+</div>
+</div>
+
+<div class="step" id="step-4">
+<h2>Install</h2>
+<pre class="log" id="install-log">$ srp installer --secure</pre>
+<div class="status show load" id="install-status">Belum dijalankan.</div>
+<div class="actions">
+<button class="btn link" type="button" data-step="3">Kembali</button>
+<div>
+<button class="btn primary" type="button" id="install-run">Jalankan instalasi</button>
+<button class="btn secondary hidden" type="button" id="summary-btn">Lihat ringkasan</button>
+</div>
+</div>
+</div>
+
+<div class="step" id="step-5">
+<h2>Final</h2>
+<div class="item"><strong>API key</strong><pre id="final-api" style="margin:10px 0 0"></pre></div>
+<div class="item"><strong>Cron jobs</strong><pre id="final-crons" style="margin:10px 0 0"></pre></div>
+<div class="item"><strong>Langkah berikutnya</strong><ol style="margin:10px 0 0;padding-left:18px"><li>Arahkan document root ke `public_html`.</li><li>Login ke `/login.php` dan isi konfigurasi routing.</li><li>Tambahkan cron jobs di atas.</li><li>Hapus `install.php` sekarang juga.</li></ol></div>
+<div class="status" id="delete-status"></div>
+<div class="actions">
+<button class="btn danger" type="button" id="delete-btn">Hapus install.php</button>
+<a class="btn primary" href="/login.php">Masuk dashboard</a>
+</div>
+</div>
+</section>
+</main>
+<script nonce="<?= h($nonce) ?>">
+var BOOT = <?= $bootJson ?>;
+var currentStep = BOOT.completed ? 5 : 1;
+var installState = {apiKey: BOOT.apiKey || '', crons: Array.isArray(BOOT.crons) ? BOOT.crons : [], running: false};
+
+function showStep(step) {
+    var i;
+    var steps = document.querySelectorAll('.step');
+    var pills = document.querySelectorAll('.pill');
+    for (i = 0; i < steps.length; i += 1) { steps[i].classList.remove('active'); }
+    for (i = 0; i < pills.length; i += 1) {
+        pills[i].classList.remove('active', 'done');
+        if ((i + 1) < step) { pills[i].classList.add('done'); }
+        if ((i + 1) === step) { pills[i].classList.add('active'); }
+    }
+    document.getElementById('step-' + String(step)).classList.add('active');
+    currentStep = step;
+    if (step === 5) {
+        document.getElementById('final-api').textContent = installState.apiKey || '(lihat .env)';
+        document.getElementById('final-crons').textContent = installState.crons.join('\n');
+    }
+}
+
+async function callApi(action, payload) {
+    var fd = new FormData();
+    var key;
+    fd.append('action', action);
+    fd.append('tok', BOOT.csrf || '');
+    for (key in payload) {
+        if (Object.prototype.hasOwnProperty.call(payload, key)) {
+            fd.append(key, payload[key]);
+        }
+    }
+    try {
+        var response = await fetch(window.location.pathname, {method: 'POST', body: fd, credentials: 'same-origin', headers: {'Accept': 'application/json'}});
+        return await response.json();
+    } catch (error) {
+        return {ok: false, error: 'Request installer gagal.'};
+    }
+}
+
+function setStatus(id, msg, type) {
+    var el = document.getElementById(id);
+    el.className = 'status show ' + (type === 'ok' ? 'ok' : type === 'load' ? 'load' : 'err');
+    el.textContent = msg;
+}
+
+async function checkReqs() {
+    var list = document.getElementById('req-list');
+    list.innerHTML = '<div class="item">Memeriksa requirement...</div>';
+    var res = await callApi('check_reqs', {});
+    var html = '';
+    var i;
+    if (!res.ok && !Array.isArray(res.items)) {
+        html = '<div class="item err">Gagal memuat requirement: ' + escapeHtml(res.error || 'unknown') + '</div>';
+        document.getElementById('req-next').disabled = true;
+        document.getElementById('req-note').textContent = 'Requirement gagal dimuat.';
+        list.innerHTML = html;
+        return;
+    }
+    for (i = 0; i < res.items.length; i += 1) {
+        var item = res.items[i];
+        var cls = item.ok ? 'ok' : (item.warn ? 'warn' : 'err');
+        html += '<div class="item ' + cls + '"><strong>' + escapeHtml(item.label) + '</strong>' + (item.note ? '<div>' + escapeHtml(item.note) + '</div>' : '') + '</div>';
+    }
+    list.innerHTML = html;
+    document.getElementById('req-next').disabled = !res.ok;
+    document.getElementById('req-note').textContent = res.ok ? 'Semua requirement wajib lolos.' : 'Masih ada requirement wajib yang gagal.';
+}
+
+function dbPayload() {
+    return {db_host: document.getElementById('db_host').value, db_port: document.getElementById('db_port').value, db_name: document.getElementById('db_name').value, db_user: document.getElementById('db_user').value, db_pass: document.getElementById('db_pass').value};
+}
+
+async function testDb() {
+    setStatus('db-status', 'Menguji koneksi database...', 'load');
+    var res = await callApi('test_db', dbPayload());
+    setStatus('db-status', res.ok ? res.message : res.error, res.ok ? 'ok' : 'err');
+}
+
+async function saveDb() {
+    setStatus('db-status', 'Memvalidasi database...', 'load');
+    var test = await callApi('test_db', dbPayload());
+    if (!test.ok) { setStatus('db-status', test.error, 'err'); return; }
+    var res = await callApi('save_db', dbPayload());
+    if (!res.ok) { setStatus('db-status', res.error, 'err'); return; }
+    setStatus('db-status', 'Database tersimpan di session installer.', 'ok');
+    showStep(3);
+}
+
+function generateApiKey() {
+    var bytes = new Uint8Array(32);
+    var i;
+    var out = '';
+    window.crypto.getRandomValues(bytes);
+    for (i = 0; i < bytes.length; i += 1) { out += bytes[i].toString(16).padStart(2, '0'); }
+    document.getElementById('api_key').value = out;
+}
+
+async function saveAdmin() {
+    if (document.getElementById('admin_pass').value !== document.getElementById('admin_pass2').value) {
+        setStatus('admin-status', 'Konfirmasi password tidak sama.', 'err');
+        return;
+    }
+    setStatus('admin-status', 'Menyimpan admin...', 'load');
+    var res = await callApi('save_admin', {admin_user: document.getElementById('admin_user').value, admin_pass: document.getElementById('admin_pass').value, api_key: document.getElementById('api_key').value, app_url: document.getElementById('app_url').value});
+    if (!res.ok) { setStatus('admin-status', res.error, 'err'); return; }
+    installState.apiKey = res.api_key || '';
+    setStatus('admin-status', 'Admin tersimpan.', 'ok');
+    showStep(4);
+}
+
+async function runInstall() {
+    if (installState.running) { return; }
+    installState.running = true;
+    document.getElementById('install-run').disabled = true;
+    document.getElementById('summary-btn').classList.add('hidden');
+    document.getElementById('install-log').textContent = '$ srp installer --secure';
+    setStatus('install-status', 'Menjalankan instalasi...', 'load');
+    var res = await callApi('run_install', {});
+    var i;
+    if (Array.isArray(res.log)) {
+        for (i = 0; i < res.log.length; i += 1) {
+            document.getElementById('install-log').textContent += '\n' + (res.log[i].ok ? '[OK] ' : '[ERR] ') + res.log[i].msg;
+        }
+    }
+    if (res.ok) {
+        installState.apiKey = res.api_key || installState.apiKey;
+        installState.crons = Array.isArray(res.crons) ? res.crons : [];
+        setStatus('install-status', 'Instalasi selesai dan installer terkunci.', 'ok');
+        document.getElementById('summary-btn').classList.remove('hidden');
+    } else {
+        setStatus('install-status', res.error || 'Instalasi gagal.', 'err');
+    }
+    document.getElementById('install-run').disabled = false;
+    installState.running = false;
+}
+
+async function deleteInstaller() {
+    if (!window.confirm('Hapus install.php sekarang?')) { return; }
+    setStatus('delete-status', 'Menghapus install.php...', 'load');
+    var res = await callApi('delete_self', {});
+    if (!res.ok) { setStatus('delete-status', res.error, 'err'); return; }
+    document.getElementById('delete-btn').disabled = true;
+    setStatus('delete-status', 'install.php berhasil dihapus.', 'ok');
+}
+
+function escapeHtml(value) {
+    return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+document.getElementById('req-refresh').addEventListener('click', checkReqs);
+document.getElementById('req-next').addEventListener('click', function () { showStep(2); });
+document.getElementById('db-test').addEventListener('click', testDb);
+document.getElementById('db-save').addEventListener('click', saveDb);
+document.getElementById('api-generate').addEventListener('click', generateApiKey);
+document.getElementById('admin-save').addEventListener('click', saveAdmin);
+document.getElementById('install-run').addEventListener('click', runInstall);
+document.getElementById('summary-btn').addEventListener('click', function () { showStep(5); });
+document.getElementById('delete-btn').addEventListener('click', deleteInstaller);
+Array.prototype.forEach.call(document.querySelectorAll('[data-step]'), function (el) { el.addEventListener('click', function () { showStep(Number(el.getAttribute('data-step'))); }); });
+
+showStep(currentStep);
+if (!BOOT.completed) { checkReqs(); }
+</script>
+</body>
+</html>

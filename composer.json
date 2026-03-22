@@ -1,0 +1,54 @@
+{
+    "name": "gassstea/srp",
+    "description": "SRP (Smart Redirect Platform) application and tooling",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": "^8.3",
+        "ext-curl": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "ext-openssl": "*",
+        "ext-pdo": "*",
+        "ext-pdo_mysql": "*"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.65",
+        "phpstan/phpstan": "^1.12",
+        "phpunit/phpunit": "^11.5",
+        "squizlabs/php_codesniffer": "^3.10"
+    },
+    "autoload": {
+        "psr-4": {
+            "SRP\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "SRP\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/phpunit --fail-on-warning",
+        "stan": "vendor/bin/phpstan analyse",
+        "cs": "vendor/bin/phpcs -p",
+        "fix:check": "vendor/bin/php-cs-fixer fix --dry-run --diff",
+        "check:no-arrow": "@php scripts/check-no-arrow.php",
+        "qa": [
+            "@check:no-arrow",
+            "@test",
+            "@stan",
+            "@cs",
+            "@fix:check"
+        ]
+    },
+    "config": {
+        "platform": {
+            "php": "8.3.30"
+        },
+        "sort-packages": true,
+        "allow-plugins": {}
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

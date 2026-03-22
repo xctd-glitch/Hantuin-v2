@@ -1,0 +1,25 @@
+# Environment & secrets
+.env
+.env.backup
+.installed
+
+# Dependencies
+vendor/
+
+# Build output
+dist/
+
+# Runtime data
+backups/*.sql
+backups/*.gz
+logs/*.log
+storage/tmp/*
+
+# IDE
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini

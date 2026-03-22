@@ -1,0 +1,122 @@
+# ===================================================================
+# SRP Web Application Configuration
+# ===================================================================
+
+# Basic options
+Options -Indexes
+Options -MultiViews
+
+# Root "/" pakai index.php
+DirectoryIndex index.php
+
+# ===================================================================
+# ENVIRONMENT VARIABLES
+# ===================================================================
+# ===================================================================
+# SECURITY & CACHING HEADERS
+# ===================================================================
+<IfModule mod_headers.c>
+    # Security headers
+    Header always set X-Frame-Options "DENY"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+    # Disable caching untuk PHP (dinamis)
+    <FilesMatch "\.(php)$">
+        Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+        Header set Pragma "no-cache"
+    </FilesMatch>
+
+    # Cache statis 1 tahun
+    <FilesMatch "\.(jpe?g|png|gif|ico|css|js|woff2?|ttf|svg)$">
+        Header set Cache-Control "max-age=31536000, public"
+    </FilesMatch>
+</IfModule>
+
+# ===================================================================
+# COMPRESSION
+# ===================================================================
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE \
+        text/html text/plain text/xml text/css text/javascript \
+        application/javascript application/json
+</IfModule>
+
+# ===================================================================
+# CONTENT TYPE HANDLING
+# ===================================================================
+# Pastikan PHP dikenali oleh LiteSpeed/OpenResty proxy
+<IfModule mod_mime.c>
+    AddType application/x-httpd-php .php
+</IfModule>
+
+# Izinkan semua Content-Type untuk PHP endpoints (cegah 415)
+<IfModule mod_headers.c>
+    <FilesMatch "\.(php)$">
+        Header always set Accept-Ranges "none"
+    </FilesMatch>
+</IfModule>
+
+# ===================================================================
+# URL REWRITING / ROUTING
+# ===================================================================
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Blok akses VCS & src (Directory* gak boleh di .htaccess)
+    RewriteRule ^(?:\.git|\.svn)/ - [F,L]
+    RewriteRule ^src/ - [F,L]
+
+    # Public API v1: /api/v1/{endpoint} → api.php with PATH_INFO
+    RewriteRule ^api/v1/?(.*)$ api.php/$1 [L,QSA]
+
+    # Visitor routing entry point: /_meetups/?click_id=...&user_lp=... → landing.php
+    RewriteRule ^_meetups/?$ landing.php [L,QSA]
+
+    # Short URL: /l/campaignname → landing.php?user_lp=campaignname
+    RewriteRule ^l/([a-zA-Z0-9_-]+)$ landing.php?user_lp=$1 [L,QSA]
+
+    # Root "/" → index.php (redundant dgn DirectoryIndex, tapi eksplisit)
+    RewriteRule ^$ index.php [L,QSA]
+
+    # "/login" → login.php
+    RewriteRule ^login/?$ login.php [L,QSA]
+
+    # "/landing" → landing.php
+    RewriteRule ^landing/?$ landing.php [L,QSA]
+
+    # Serve file/direktori asli apa adanya
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # (Opsional) front controller:
+    # Semua URL lain tembak ke index.php
+    #RewriteRule ^(.+)$ index.php [L,QSA]
+</IfModule>
+
+# ===================================================================
+# DENY ACCESS TO SENSITIVE FILES
+# ===================================================================
+<IfModule mod_authz_core.c>
+    # Deny access ke .env
+    <FilesMatch "^\.env">
+        Require all denied
+    </FilesMatch>
+
+    # Deny backup / temp files
+    <FilesMatch "\.(bak|backup|old|tmp)$">
+        Require all denied
+    </FilesMatch>
+
+    # Deny composer files
+    <FilesMatch "^(composer\.json|composer\.lock)$">
+        Require all denied
+    </FilesMatch>
+
+    # Deny PHP config files
+    <FilesMatch "^(php\.ini|\.user\.ini)$">
+        Require all denied
+    </FilesMatch>
+</IfModule>
