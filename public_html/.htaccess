@@ -6,6 +6,11 @@
 #          Content-Type fix (415 prevention), trusted proxy support.
 # ===================================================================
 
+# ── FORCE PHP 8.3 (cPanel/CloudLinux/LiteSpeed) ─────────────────
+# Jika hosting masih pakai PHP lama, baris ini force PHP 8.3.
+# Sesuaikan ea-php83 dengan versi yang tersedia di server.
+AddHandler application/x-httpd-ea-php83 .php
+
 # ── BASIC OPTIONS ────────────────────────────────────────────────
 Options -Indexes
 Options -MultiViews
