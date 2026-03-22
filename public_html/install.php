@@ -154,6 +154,24 @@ function runInstall(array $state): never
         $ok = false;
     }
 
+    // Auto-install cron jobs (non-fatal jika gagal)
+    try {
+        $cronScript = ROOT . '/cron/auto-setup.php';
+        if (is_file($cronScript)) {
+            $cronOutput = [];
+            $cronCode = 0;
+            exec(PHP_BINARY . ' ' . escapeshellarg($cronScript) . ' 2>&1', $cronOutput, $cronCode);
+            if ($cronCode === 0) {
+                $log[] = ['ok' => true, 'msg' => 'Cron jobs otomatis terpasang (purge, backup, health-check).'];
+            } else {
+                $log[] = ['ok' => true, 'msg' => 'Cron auto-setup dilewati (manual: php cron/auto-setup.php).'];
+            }
+        }
+    } catch (Throwable $e) {
+        // Non-fatal: cron bisa dipasang manual
+        $log[] = ['ok' => true, 'msg' => 'Cron auto-setup dilewati. Pasang manual via crontab.'];
+    }
+
     if ($ok) {
         writeAtomic(LOCK_FILE, gmdate('c'), 0600);
         session_regenerate_id(true);
@@ -359,7 +377,8 @@ function writeEnv(array $db, array $admin): void
         '# ===================================================================',
         '',
         '# ── Application ────────────────────────────────────────────────────',
-        'APP_URL=' . envValue($admin['app_url']),
+        '# Kosongkan atau "auto" untuk auto-detect dari request',
+        'APP_URL=' . ($admin['app_url'] !== '' ? envValue($admin['app_url']) : 'auto'),
         'APP_ENV=production',
         'APP_DEBUG=false',
         'SRP_ENV=production',
@@ -410,11 +429,13 @@ function writeEnv(array $db, array $admin): void
         'SRP_USER_PASSWORD=',
         '',
         '# ── Security ───────────────────────────────────────────────────────',
-        'SRP_TRUSTED_PROXIES=',
+        '# Cloudflare IPv4 + IPv6 ranges (https://www.cloudflare.com/ips/)',
+        'SRP_TRUSTED_PROXIES=173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32',
         'SRP_FORCE_SECURE_COOKIES=true',
         '',
         '# ── Cache ──────────────────────────────────────────────────────────',
-        'CACHE_DRIVER=',
+        '# auto = Redis > Memcached > APCu > none',
+        'CACHE_DRIVER=auto',
         'CACHE_PREFIX=srp_',
         'REDIS_HOST=127.0.0.1',
         'REDIS_PORT=6379',
@@ -718,100 +739,597 @@ function h(string $value): string
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hantuin-v2 Installer</title>
 <style nonce="<?= h($nonce) ?>">
-body{margin:0;font:16px/1.5 "Segoe UI",Arial,sans-serif;background:#0f172a;color:#e2e8f0}main{max-width:860px;margin:0 auto;padding:24px}section,header{background:#111827;border:1px solid #334155;border-radius:18px;padding:20px;margin-bottom:18px}.card{background:#fff;color:#0f172a}.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}.field{margin-bottom:14px}.field label{display:block;font-size:13px;font-weight:700;color:#475569;margin-bottom:6px}.field input{width:100%;box-sizing:border-box;padding:12px 14px;border:1px solid #cbd5e1;border-radius:12px}.actions{display:flex;gap:12px;justify-content:space-between;align-items:center;flex-wrap:wrap}.btn{border:0;border-radius:999px;padding:12px 18px;font-weight:700;cursor:pointer;text-decoration:none;display:inline-block}.primary{background:#0f766e;color:#fff}.secondary{background:#ecfeff;color:#155e75}.danger{background:#fef2f2;color:#b91c1c}.link{background:transparent;color:#64748b;padding:0}.hidden{display:none!important}.step{display:none}.step.active{display:block}.status{display:none;padding:12px 14px;border-radius:12px;margin-top:10px;font-weight:600}.status.show{display:block}.ok{background:#f0fdf4;color:#166534}.err{background:#fef2f2;color:#b91c1c}.load{background:#eff6ff;color:#1d4ed8}.item{padding:12px 14px;border-radius:12px;border:1px solid #e2e8f0;margin-bottom:10px;background:#f8fafc}.item.ok{background:#f0fdf4}.item.err{background:#fef2f2}.item.warn{background:#fffbeb}.log{background:#020617;color:#cbd5e1;border-radius:14px;padding:14px;min-height:220px;font:13px/1.6 Consolas,monospace;white-space:pre-wrap}.pillbar{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:18px}.pill{padding:10px 12px;border-radius:999px;border:1px solid #334155;text-align:center;color:#94a3b8;font-size:13px}.pill.active{background:#ecfeff;color:#155e75;border-color:#0f766e}.pill.done{background:#0f766e;color:#fff;border-color:#0f766e}code,pre{font-family:Consolas,monospace}@media(max-width:700px){.row,.pillbar{grid-template-columns:1fr}}
+/* ── CSS Variables (match dashboard) ─────────────── */
+:root {
+    --ring-color:             hsl(240 5.9% 10%);
+    --muted-foreground:       hsl(240 4% 44%);
+    --border-color:           hsl(240 6% 89%);
+    --primary:                hsl(240 5.9% 10%);
+    --primary-foreground:     hsl(0 0% 98%);
+    --secondary:              hsl(240 5% 96%);
+    --secondary-foreground:   hsl(240 5.9% 10%);
+    --destructive:            hsl(0 84.2% 60.2%);
+    --destructive-foreground: hsl(0 0% 98%);
+    --page-bg:                hsl(220 18% 95.5%);
+    --card-bg:                hsl(0 0% 100%);
+    --card-shadow:            0 1px 3px hsla(240,6%,10%,.07), 0 1px 2px hsla(240,6%,10%,.05);
+    --radius:                 .375rem;
+    --success-bg:             hsl(143 76% 96%);
+    --success-fg:             hsl(143 64% 24%);
+    --success-border:         hsl(143 56% 82%);
+    --error-bg:               hsl(0 86% 97%);
+    --error-fg:               hsl(0 72% 51%);
+    --error-border:           hsl(0 60% 88%);
+    --warn-bg:                hsl(48 96% 96%);
+    --warn-fg:                hsl(32 95% 44%);
+    --warn-border:            hsl(48 80% 82%);
+    --info-bg:                hsl(214 95% 96%);
+    --info-fg:                hsl(221 83% 53%);
+    --info-border:            hsl(214 80% 88%);
+}
+
+/* ── Reset ───────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* ── Base Typography (match dashboard Inter) ─────── */
+html {
+    font-size: 16px;
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+}
+body {
+    margin: 0;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    line-height: 1.5;
+    letter-spacing: -.012em;
+    background-color: var(--page-bg);
+    color: hsl(240 10% 3.9%);
+    min-height: 100vh;
+}
+
+/* ── Scrollbars ──────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(240 5% 82%); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(240 4% 62%); }
+
+/* ── Layout ──────────────────────────────────────── */
+.installer-wrapper {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 1.5rem 1.25rem 3rem;
+}
+
+/* ── Header bar (match dashboard sticky nav) ─────── */
+.installer-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    width: 100%;
+    border-bottom: 1px solid var(--border-color);
+    background-color: hsla(0 0% 100% / .95);
+    backdrop-filter: blur(8px);
+}
+.installer-topbar-inner {
+    display: flex;
+    height: 3rem;
+    max-width: 720px;
+    margin: 0 auto;
+    align-items: center;
+    padding: 0 1.25rem;
+    gap: .625rem;
+}
+.installer-topbar .logo-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: var(--radius);
+    background: var(--primary);
+    color: var(--primary-foreground);
+    flex-shrink: 0;
+}
+.installer-topbar .logo-icon svg { width: 1rem; height: 1rem; }
+.installer-topbar .title-group { display: flex; flex-direction: column; line-height: 1.2; }
+.installer-topbar .title-text { font-size: .8125rem; font-weight: 600; letter-spacing: -.01em; }
+.installer-topbar .sub-text { font-size: .6875rem; color: var(--muted-foreground); }
+
+/* ── Card ────────────────────────────────────────── */
+.card {
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+    background-color: var(--card-bg);
+    color: hsl(240 10% 3.9%);
+    box-shadow: var(--card-shadow);
+}
+.card-body { padding: 1.25rem; }
+.card-header {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* ── Step pills (stepper) ────────────────────────── */
+.pillbar {
+    display: flex;
+    gap: .375rem;
+    margin-bottom: 1.25rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.pill {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .375rem;
+    padding: .5rem .625rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+    text-align: center;
+    color: var(--muted-foreground);
+    font-size: .75rem;
+    font-weight: 500;
+    white-space: nowrap;
+    transition: all .2s ease;
+    cursor: default;
+}
+.pill .pill-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: 50%;
+    border: 1px solid var(--border-color);
+    font-size: .625rem;
+    font-weight: 600;
+    flex-shrink: 0;
+    transition: all .2s ease;
+}
+.pill.active {
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+    border-color: var(--primary);
+}
+.pill.active .pill-num {
+    background: hsla(0 0% 100% / .2);
+    border-color: hsla(0 0% 100% / .3);
+    color: var(--primary-foreground);
+}
+.pill.done {
+    background-color: var(--success-bg);
+    color: var(--success-fg);
+    border-color: var(--success-border);
+}
+.pill.done .pill-num {
+    background: var(--success-fg);
+    border-color: var(--success-fg);
+    color: #fff;
+}
+
+/* ── Step sections ───────────────────────────────── */
+.step { display: none; }
+.step.active { display: block; }
+.step h2 {
+    font-size: .9375rem;
+    font-weight: 600;
+    letter-spacing: -.01em;
+    margin: 0 0 1rem;
+}
+.step-desc {
+    font-size: .8125rem;
+    color: var(--muted-foreground);
+    margin: -.5rem 0 1rem;
+}
+
+/* ── Form fields ─────────────────────────────────── */
+.field { margin-bottom: .875rem; }
+.field label {
+    display: block;
+    font-size: .75rem;
+    font-weight: 500;
+    color: hsl(240 10% 3.9%);
+    margin-bottom: .375rem;
+    letter-spacing: -.005em;
+}
+.field input {
+    display: flex;
+    height: 2.125rem;
+    width: 100%;
+    border-radius: calc(var(--radius) - 1px);
+    border: 1px solid var(--border-color);
+    background-color: transparent;
+    padding: .25rem .7rem;
+    font-size: .8125rem;
+    font-family: inherit;
+    line-height: 1.5;
+    color: hsl(240 10% 3.9%);
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+.field input::placeholder { color: var(--muted-foreground); opacity: .75; }
+.field input:focus,
+.field input:focus-visible {
+    outline: none;
+    border-color: hsl(240 5.9% 36%);
+    box-shadow: 0 0 0 3px hsla(240, 5.9%, 10%, .10);
+}
+.field input:disabled { cursor: not-allowed; opacity: .5; }
+
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: .875rem; }
+
+/* ── Buttons (match dashboard) ───────────────────── */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: .375rem;
+    white-space: nowrap;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+    font-size: .8125rem;
+    font-weight: 500;
+    font-family: inherit;
+    line-height: 1;
+    letter-spacing: -.005em;
+    cursor: pointer;
+    user-select: none;
+    padding: .35rem 1rem;
+    height: 2.125rem;
+    text-decoration: none;
+    transition: background-color .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease, opacity .15s ease;
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+}
+.btn:focus-visible { box-shadow: 0 0 0 2px var(--ring-color); }
+.btn:disabled { pointer-events: none; opacity: .45; }
+.btn svg { width: .875rem; height: .875rem; flex-shrink: 0; }
+
+.primary {
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+}
+.primary:hover { background-color: hsl(240 5.9% 16%); }
+.primary:active { background-color: hsl(240 5.9% 7%); }
+
+.secondary {
+    background-color: var(--secondary);
+    color: var(--secondary-foreground);
+    border-color: var(--border-color);
+}
+.secondary:hover { background-color: hsl(240 5% 91%); }
+
+.danger {
+    background-color: var(--destructive);
+    color: var(--destructive-foreground);
+}
+.danger:hover { background-color: hsl(0 84.2% 54%); }
+
+.ghost {
+    background-color: transparent;
+    color: var(--muted-foreground);
+}
+.ghost:hover { background-color: var(--secondary); color: hsl(240 5.9% 10%); }
+
+.link {
+    background: transparent;
+    color: var(--muted-foreground);
+    padding: 0;
+    height: auto;
+    border: 0;
+    font-size: .75rem;
+}
+.link:hover { color: hsl(240 5.9% 10%); text-decoration: underline; }
+
+.btn-sm { height: 1.875rem; padding: .25rem .625rem; font-size: .75rem; border-radius: calc(var(--radius) - 1px); }
+
+/* ── Actions bar ─────────────────────────────────── */
+.actions {
+    display: flex;
+    gap: .75rem;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 1.25rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+.actions > div { display: flex; gap: .5rem; }
+
+/* ── Status messages ─────────────────────────────── */
+.status {
+    display: none;
+    padding: .625rem .75rem;
+    border-radius: calc(var(--radius) - 1px);
+    margin-top: .75rem;
+    font-weight: 500;
+    font-size: .8125rem;
+    border: 1px solid transparent;
+}
+.status.show { display: flex; align-items: center; gap: .5rem; }
+.status::before { font-size: .875rem; flex-shrink: 0; }
+.ok { background: var(--success-bg); color: var(--success-fg); border-color: var(--success-border); }
+.ok::before { content: "\2713"; }
+.err { background: var(--error-bg); color: var(--error-fg); border-color: var(--error-border); }
+.err::before { content: "\2717"; }
+.load { background: var(--info-bg); color: var(--info-fg); border-color: var(--info-border); }
+.load::before { content: "\25CB"; animation: pulse-dot 1.2s ease-in-out infinite; }
+@keyframes pulse-dot { 0%,100% { opacity: .4; } 50% { opacity: 1; } }
+
+/* ── Requirement items ───────────────────────────── */
+.item {
+    display: flex;
+    align-items: flex-start;
+    gap: .625rem;
+    padding: .625rem .75rem;
+    border-radius: calc(var(--radius) - 1px);
+    border: 1px solid var(--border-color);
+    margin-bottom: .5rem;
+    background: var(--card-bg);
+    font-size: .8125rem;
+}
+.item::before { font-size: .8125rem; flex-shrink: 0; margin-top: 1px; }
+.item.ok { background: var(--success-bg); border-color: var(--success-border); }
+.item.ok::before { content: "\2713"; color: var(--success-fg); }
+.item.err { background: var(--error-bg); border-color: var(--error-border); }
+.item.err::before { content: "\2717"; color: var(--error-fg); }
+.item.warn { background: var(--warn-bg); border-color: var(--warn-border); }
+.item.warn::before { content: "\26A0"; color: var(--warn-fg); }
+.item strong { font-weight: 600; }
+.item div { font-size: .75rem; color: var(--muted-foreground); margin-top: .125rem; }
+
+/* ── Install log terminal ────────────────────────── */
+.log {
+    background: hsl(240 10% 3.9%);
+    color: hsl(240 5% 80%);
+    border-radius: var(--radius);
+    border: 1px solid hsl(240 6% 20%);
+    padding: 1rem;
+    min-height: 200px;
+    max-height: 320px;
+    overflow-y: auto;
+    font: .75rem/1.7 'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+    scrollbar-width: thin;
+}
+.log::-webkit-scrollbar { width: 4px; }
+.log::-webkit-scrollbar-thumb { background: hsl(240 5% 30%); border-radius: 4px; }
+
+/* ── Final summary items ─────────────────────────── */
+.summary-item {
+    padding: .875rem 1rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+    margin-bottom: .75rem;
+    background: var(--card-bg);
+}
+.summary-item strong {
+    display: block;
+    font-size: .75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: var(--muted-foreground);
+    margin-bottom: .5rem;
+}
+.summary-item pre {
+    margin: 0;
+    padding: .625rem .75rem;
+    background: hsl(240 5% 96%);
+    border-radius: calc(var(--radius) - 1px);
+    font: .75rem/1.6 'SF Mono', Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow-x: auto;
+    color: hsl(240 10% 3.9%);
+}
+.summary-item ol {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: .8125rem;
+    line-height: 1.7;
+    color: hsl(240 10% 20%);
+}
+.summary-item ol code {
+    font-size: .75rem;
+    padding: .1rem .35rem;
+    background: hsl(240 5% 96%);
+    border-radius: 3px;
+    font-family: 'SF Mono', Consolas, monospace;
+}
+
+/* ── Helper note text ────────────────────────────── */
+.note-text {
+    font-size: .75rem;
+    color: var(--muted-foreground);
+    margin: .25rem 0 0;
+}
+
+/* ── Hidden ──────────────────────────────────────── */
+.hidden { display: none !important; }
+
+/* ── Responsive ──────────────────────────────────── */
+@media (max-width: 639px) {
+    .installer-wrapper { padding: 1rem .75rem 2rem; }
+    .row { grid-template-columns: 1fr; }
+    .pillbar { gap: .25rem; }
+    .pill { padding: .375rem .375rem; font-size: .6875rem; }
+    .pill .pill-label { display: none; }
+    .pill .pill-num { width: 1.5rem; height: 1.5rem; font-size: .6875rem; }
+    .field input { height: 2.5rem; font-size: .875rem; }
+    .btn { height: 2.5rem; }
+    .btn-sm { height: 2.125rem; }
+    .actions { gap: .5rem; }
+}
 </style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-<main>
-<header>
-<h1 style="margin:0 0 8px">Hantuin-v2 Installer</h1>
-<p style="margin:0;color:#cbd5e1">Session aman, CSRF wajib, CSP nonce aktif, setup database via PDO tanpa multi-statement.</p>
-</header>
 
-<section class="card">
+<!-- ── Top bar ──────────────────────────────────── -->
+<nav class="installer-topbar">
+    <div class="installer-topbar-inner">
+        <div class="logo-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+            </svg>
+        </div>
+        <div class="title-group">
+            <span class="title-text">Hantuin-v2 Installer</span>
+            <span class="sub-text">Secure setup &mdash; CSRF + CSP nonce + PDO safe</span>
+        </div>
+    </div>
+</nav>
+
+<!-- ── Main wrapper ─────────────────────────────── -->
+<div class="installer-wrapper">
+
+<!-- ── Step card ─────────────────────────────────── -->
+<div class="card">
+<div class="card-body">
 <div class="pillbar">
-<div class="pill" data-pill="1">1. Requirements</div>
-<div class="pill" data-pill="2">2. Database</div>
-<div class="pill" data-pill="3">3. Admin</div>
-<div class="pill" data-pill="4">4. Install</div>
-<div class="pill" data-pill="5">5. Final</div>
+    <div class="pill" data-pill="1"><span class="pill-num">1</span><span class="pill-label">Requirements</span></div>
+    <div class="pill" data-pill="2"><span class="pill-num">2</span><span class="pill-label">Database</span></div>
+    <div class="pill" data-pill="3"><span class="pill-num">3</span><span class="pill-label">Admin</span></div>
+    <div class="pill" data-pill="4"><span class="pill-num">4</span><span class="pill-label">Install</span></div>
+    <div class="pill" data-pill="5"><span class="pill-num">5</span><span class="pill-label">Final</span></div>
 </div>
 
+<!-- ── Step 1: Requirements ──────────────────────── -->
 <div class="step" id="step-1">
-<h2>Requirements</h2>
+<h2>System Requirements</h2>
+<p class="step-desc">Memastikan server memenuhi syarat minimum.</p>
 <div id="req-list"></div>
 <div class="actions">
-<span id="req-note" style="color:#64748b">Requirement wajib harus lolos semua.</span>
+<span id="req-note" class="note-text">Semua requirement wajib harus lolos.</span>
 <div>
-<button class="btn secondary" type="button" id="req-refresh">Periksa ulang</button>
-<button class="btn primary" type="button" id="req-next" disabled>Lanjut</button>
+<button class="btn secondary btn-sm" type="button" id="req-refresh">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+    Periksa ulang
+</button>
+<button class="btn primary btn-sm" type="button" id="req-next" disabled>
+    Lanjut
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+</button>
 </div>
 </div>
 </div>
 
+<!-- ── Step 2: Database ──────────────────────────── -->
 <div class="step" id="step-2">
-<h2>Database</h2>
+<h2>Database Configuration</h2>
+<p class="step-desc">Koneksi MySQL/MariaDB untuk menyimpan data routing.</p>
 <div class="row">
-<div class="field"><label for="db_host">DB host</label><input id="db_host" type="text" value="<?= h($dbHost) ?>" maxlength="255"></div>
-<div class="field"><label for="db_port">Port</label><input id="db_port" type="number" value="<?= h($dbPort) ?>" min="1" max="65535"></div>
-<div class="field"><label for="db_name">Database name</label><input id="db_name" type="text" value="<?= h($dbName) ?>" maxlength="64"></div>
-<div class="field"><label for="db_user">Database user</label><input id="db_user" type="text" value="<?= h($dbUser) ?>" maxlength="128"></div>
+<div class="field"><label for="db_host">DB Host</label><input id="db_host" type="text" value="<?= h($dbHost) ?>" maxlength="255" placeholder="localhost"></div>
+<div class="field"><label for="db_port">Port</label><input id="db_port" type="number" value="<?= h($dbPort) ?>" min="1" max="65535" placeholder="3306"></div>
+<div class="field"><label for="db_name">Database Name</label><input id="db_name" type="text" value="<?= h($dbName) ?>" maxlength="64" placeholder="srp"></div>
+<div class="field"><label for="db_user">Database User</label><input id="db_user" type="text" value="<?= h($dbUser) ?>" maxlength="128" placeholder="root"></div>
 </div>
-<div class="field"><label for="db_pass">Database password</label><input id="db_pass" type="password" maxlength="255"></div>
+<div class="field"><label for="db_pass">Database Password</label><input id="db_pass" type="password" maxlength="255" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"></div>
 <div class="status" id="db-status"></div>
 <div class="actions">
-<button class="btn link" type="button" data-step="1">Kembali</button>
+<button class="btn link" type="button" data-step="1">&larr; Kembali</button>
 <div>
-<button class="btn secondary" type="button" id="db-test">Tes koneksi</button>
-<button class="btn primary" type="button" id="db-save">Simpan</button>
+<button class="btn secondary btn-sm" type="button" id="db-test">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+    Tes koneksi
+</button>
+<button class="btn primary btn-sm" type="button" id="db-save">
+    Simpan &amp; lanjut
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+</button>
 </div>
 </div>
 </div>
 
+<!-- ── Step 3: Admin ─────────────────────────────── -->
 <div class="step" id="step-3">
-<h2>Admin</h2>
-<div class="field"><label for="admin_user">Username admin</label><input id="admin_user" type="text" value="<?= h($adminUser) ?>" maxlength="64"></div>
-<div class="field"><label for="admin_pass">Password admin</label><input id="admin_pass" type="password" maxlength="255"></div>
-<div class="field"><label for="admin_pass2">Ulangi password</label><input id="admin_pass2" type="password" maxlength="255"></div>
-<div class="field"><label for="api_key">API key opsional</label><input id="api_key" type="text" value="<?= h($apiKey) ?>" maxlength="64"></div>
-<div class="field"><label for="app_url">Application URL</label><input id="app_url" type="url" placeholder="https://trackng.us" maxlength="255"></div>
-<p id="pw-note" style="color:#64748b;margin-top:0">Minimal 8 karakter, wajib huruf kecil dan angka.</p>
+<h2>Admin &amp; API Configuration</h2>
+<p class="step-desc">Kredensial dashboard dan kunci API.</p>
+<div class="field"><label for="admin_user">Username Admin</label><input id="admin_user" type="text" value="<?= h($adminUser) ?>" maxlength="64" placeholder="admin"></div>
+<div class="row">
+<div class="field"><label for="admin_pass">Password Admin</label><input id="admin_pass" type="password" maxlength="255" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"></div>
+<div class="field"><label for="admin_pass2">Konfirmasi Password</label><input id="admin_pass2" type="password" maxlength="255" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"></div>
+</div>
+<p class="note-text" id="pw-note">Minimal 8 karakter, wajib mengandung huruf kecil dan angka.</p>
+<div class="field" style="margin-top:.875rem"><label for="api_key">API Key <span style="font-weight:400;color:var(--muted-foreground)">(opsional, auto-generate jika kosong)</span></label><input id="api_key" type="text" value="<?= h($apiKey) ?>" maxlength="64" placeholder="64 karakter hex" style="font-family:'SF Mono',Consolas,monospace;font-size:.75rem;letter-spacing:.02em"></div>
+<div class="field"><label for="app_url">Application URL</label><input id="app_url" type="url" placeholder="https://domain.com" maxlength="255"></div>
 <div class="status" id="admin-status"></div>
 <div class="actions">
-<button class="btn link" type="button" data-step="2">Kembali</button>
+<button class="btn link" type="button" data-step="2">&larr; Kembali</button>
 <div>
-<button class="btn secondary" type="button" id="api-generate">Generate API key</button>
-<button class="btn primary" type="button" id="admin-save">Simpan</button>
+<button class="btn secondary btn-sm" type="button" id="api-generate">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M12 12h.01"/><path d="M17 12h.01"/><path d="M7 12h.01"/></svg>
+    Generate key
+</button>
+<button class="btn primary btn-sm" type="button" id="admin-save">
+    Simpan &amp; lanjut
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+</button>
 </div>
 </div>
 </div>
 
+<!-- ── Step 4: Install ───────────────────────────── -->
 <div class="step" id="step-4">
-<h2>Install</h2>
+<h2>Run Installation</h2>
+<p class="step-desc">Menulis .env, membuat schema database, dan hardening file system.</p>
 <pre class="log" id="install-log">$ srp installer --secure</pre>
 <div class="status show load" id="install-status">Belum dijalankan.</div>
 <div class="actions">
-<button class="btn link" type="button" data-step="3">Kembali</button>
+<button class="btn link" type="button" data-step="3">&larr; Kembali</button>
 <div>
-<button class="btn primary" type="button" id="install-run">Jalankan instalasi</button>
-<button class="btn secondary hidden" type="button" id="summary-btn">Lihat ringkasan</button>
+<button class="btn primary" type="button" id="install-run">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+    Jalankan instalasi
+</button>
+<button class="btn secondary hidden" type="button" id="summary-btn">
+    Lihat ringkasan
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+</button>
 </div>
 </div>
 </div>
 
+<!-- ── Step 5: Final ─────────────────────────────── -->
 <div class="step" id="step-5">
-<h2>Final</h2>
-<div class="item"><strong>API key</strong><pre id="final-api" style="margin:10px 0 0"></pre></div>
-<div class="item"><strong>Cron jobs</strong><pre id="final-crons" style="margin:10px 0 0"></pre></div>
-<div class="item"><strong>Langkah berikutnya</strong><ol style="margin:10px 0 0;padding-left:18px"><li>Arahkan document root ke `public_html`.</li><li>Login ke `/login.php` dan isi konfigurasi routing.</li><li>Tambahkan cron jobs di atas.</li><li>Hapus `install.php` sekarang juga.</li></ol></div>
+<h2>Installation Complete</h2>
+<p class="step-desc">Simpan informasi berikut dan hapus installer.</p>
+<div class="summary-item"><strong>API Key</strong><pre id="final-api"></pre></div>
+<div class="summary-item"><strong>Cron Jobs</strong><pre id="final-crons"></pre></div>
+<div class="summary-item">
+    <strong>Langkah Selanjutnya</strong>
+    <ol>
+        <li>Pastikan document root mengarah ke <code>public_html/</code></li>
+        <li>Login ke <code>/login.php</code> dan konfigurasi routing</li>
+        <li>Pasang cron jobs di atas via cPanel atau <code>crontab -e</code></li>
+        <li>Hapus <code>install.php</code> dari server sekarang juga</li>
+    </ol>
+</div>
 <div class="status" id="delete-status"></div>
 <div class="actions">
-<button class="btn danger" type="button" id="delete-btn">Hapus install.php</button>
-<a class="btn primary" href="/login.php">Masuk dashboard</a>
+<button class="btn danger" type="button" id="delete-btn">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+    Hapus install.php
+</button>
+<a class="btn primary" href="/login.php">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+    Masuk dashboard
+</a>
 </div>
 </div>
-</section>
-</main>
+
+</div><!-- card-body -->
+</div><!-- card -->
+
+</div><!-- installer-wrapper -->
 <script nonce="<?= h($nonce) ?>">
 var BOOT = <?= $bootJson ?>;
 var currentStep = BOOT.completed ? 5 : 1;
