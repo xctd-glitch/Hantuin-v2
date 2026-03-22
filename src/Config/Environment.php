@@ -49,15 +49,31 @@ class Environment
      * Returns APP_URL from .env (trailing slash stripped).
      * Falls back to auto-detecting scheme + host from the current request.
      */
+    /**
+     * Returns APP_URL from .env (trailing slash stripped).
+     * Falls back to auto-detecting scheme + host from the current request
+     * when APP_URL is empty or set to 'auto'.
+     */
     public static function getAppUrl(): string
     {
         $url = rtrim(trim(self::get('APP_URL')), '/');
-        if ($url !== '') {
+        if ($url !== '' && strtolower($url) !== 'auto') {
             return $url;
         }
 
-        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-        $host   = (string) ($_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? 'localhost'));
+        // Auto-detect dari request headers
+        // Cloudflare / reverse proxy: X-Forwarded-Proto, CF-Visitor
+        $scheme = 'http';
+        if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+            $scheme = 'https';
+        } elseif (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https') {
+            $scheme = 'https';
+        } elseif (str_contains(($_SERVER['HTTP_CF_VISITOR'] ?? ''), '"https"')) {
+            $scheme = 'https';
+        }
+
+        $host = (string) ($_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? 'localhost'));
+
         return $scheme . '://' . $host;
     }
 

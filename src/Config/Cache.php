@@ -222,9 +222,14 @@ class Cache
             return;
         }
 
-        // Auto-detect: Redis → APCu → no-op
+        // Auto-detect: Redis → Memcached → APCu → no-op (juga berlaku untuk 'auto')
         if (self::setupRedis()) {
             self::$driver = 'redis';
+            return;
+        }
+
+        if (self::setupMemcached()) {
+            self::$driver = 'memcached';
             return;
         }
 
