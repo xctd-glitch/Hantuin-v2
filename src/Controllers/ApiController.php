@@ -116,7 +116,7 @@ class ApiController
         // Merge conversion data into traffic rows
         foreach ($traffic as &$row) {
             $c = $convMap[$row['day']] ?? null;
-            $row['conv_count']   = $c ? $c['total']        : 0;
+            $row['conv_count']   = $c ? $c['total'] : 0;
             $row['conv_payout']  = $c ? $c['total_payout'] : 0.0;
         }
         unset($row);
@@ -160,7 +160,7 @@ class ApiController
                 (string)($data['country_filter_mode'] ?? 'all'),
                 (string)($data['country_filter_list'] ?? ''),
                 (string)($data['postback_url'] ?? $currentCfg['postback_url']),
-                (string)($data['postback_token']       ?? '')
+                (string)($data['postback_token']       ?? ''),
             );
         } catch (\InvalidArgumentException $e) {
             http_response_code(400);

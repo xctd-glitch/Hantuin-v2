@@ -59,7 +59,7 @@ class Settings
                     postback_token,
                     updated_at
                FROM settings
-              WHERE id = :id'
+              WHERE id = :id',
         );
         $statement->bindValue(':id', 1, PDO::PARAM_INT);
         $statement->execute();
@@ -78,7 +78,7 @@ class Settings
         string $filterMode = 'all',
         string $filterList = '',
         string $postbackUrl = '',
-        string $postbackToken = ''
+        string $postbackToken = '',
     ): void {
         $safeUrl = self::validateUrl($url);
         $safePostback = self::validatePostbackUrl($postbackUrl);
@@ -109,7 +109,7 @@ class Settings
                     postback_url = :postback_url,
                     postback_token = :postback_token,
                     updated_at = UNIX_TIMESTAMP()
-              WHERE id = :id'
+              WHERE id = :id',
         );
         $statement->bindValue(':system_on', $on ? 1 : 0, PDO::PARAM_INT);
         $statement->bindValue(':redirect_url', $safeUrl, PDO::PARAM_STR);

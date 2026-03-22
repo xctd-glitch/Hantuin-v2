@@ -1,0 +1,10 @@
+parameters:
+    level: 6
+    paths:
+        - src
+        - public_html
+    excludePaths:
+        - public_html/install.php
+        - public_html/offline.html
+    ignoreErrors: []
+    phpVersion: 80300

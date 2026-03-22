@@ -1,7 +1,5 @@
 <?php
 
-declare(strict_types=1);
-
 /**
  * Dashboard Statistik Terpisah
  *
@@ -9,6 +7,8 @@ declare(strict_types=1);
  * dengan memanggil Public API (X-API-Key).
  * Tidak memerlukan session/login — cukup API key.
  */
+
+declare(strict_types=1);
 
 require_once __DIR__ . '/../src/Config/Bootstrap.php';
 

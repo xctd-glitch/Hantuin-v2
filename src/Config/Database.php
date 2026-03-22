@@ -112,7 +112,7 @@ SQL);
             $connection->exec(
                 "ALTER TABLE settings
                  ADD COLUMN postback_url VARCHAR(2048) NOT NULL DEFAULT ''
-                 AFTER country_filter_list"
+                 AFTER country_filter_list",
             );
         }
 
@@ -120,7 +120,7 @@ SQL);
             $connection->exec(
                 "ALTER TABLE settings
                  ADD COLUMN postback_token VARCHAR(64) NOT NULL DEFAULT ''
-                 AFTER postback_url"
+                 AFTER postback_url",
             );
         }
 
@@ -165,14 +165,14 @@ SQL);
 
         if (!self::columnExists($connection, 'conversions', 'country')) {
             $connection->exec(
-                "ALTER TABLE conversions
+                'ALTER TABLE conversions
                  ADD COLUMN country VARCHAR(10) NULL
-                 AFTER status"
+                 AFTER status',
             );
         }
 
         $statement = $connection->prepare(
-            "INSERT INTO settings (
+            'INSERT INTO settings (
                 id,
                 redirect_url,
                 system_on,
@@ -192,7 +192,7 @@ SQL);
                 :postback_token,
                 UNIX_TIMESTAMP()
             )
-             ON DUPLICATE KEY UPDATE id = id"
+             ON DUPLICATE KEY UPDATE id = id',
         );
         $statement->execute([
             ':id' => 1,
@@ -211,7 +211,7 @@ SQL);
             'SELECT COUNT(*) FROM information_schema.COLUMNS
              WHERE TABLE_SCHEMA = DATABASE()
                AND TABLE_NAME = :table_name
-               AND COLUMN_NAME = :column_name'
+               AND COLUMN_NAME = :column_name',
         );
         $statement->execute([
             ':table_name' => $tableName,
@@ -227,7 +227,7 @@ SQL);
             'SELECT COUNT(*) FROM information_schema.STATISTICS
              WHERE TABLE_SCHEMA = DATABASE()
                AND TABLE_NAME = :table_name
-               AND INDEX_NAME = :index_name'
+               AND INDEX_NAME = :index_name',
         );
         $statement->execute([
             ':table_name' => $tableName,

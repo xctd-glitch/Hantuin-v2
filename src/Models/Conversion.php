@@ -27,7 +27,7 @@ class Conversion
         if (self::hasCountryColumn($connection)) {
             $statement = $connection->prepare(
                 'INSERT INTO conversions (ts, click_id, payout, currency, status, country, ip, raw)
-                 VALUES (UNIX_TIMESTAMP(), :click_id, :payout, :currency, :status, :country, :ip, :raw)'
+                 VALUES (UNIX_TIMESTAMP(), :click_id, :payout, :currency, :status, :country, :ip, :raw)',
             );
             $statement->bindValue(':click_id', $clickId, PDO::PARAM_STR);
             $statement->bindValue(':payout', $payout);
@@ -39,7 +39,7 @@ class Conversion
         } else {
             $statement = $connection->prepare(
                 'INSERT INTO conversions (ts, click_id, payout, currency, status, ip, raw)
-                 VALUES (UNIX_TIMESTAMP(), :click_id, :payout, :currency, :status, :ip, :raw)'
+                 VALUES (UNIX_TIMESTAMP(), :click_id, :payout, :currency, :status, :ip, :raw)',
             );
             $statement->bindValue(':click_id', $clickId, PDO::PARAM_STR);
             $statement->bindValue(':payout', $payout);
@@ -69,7 +69,7 @@ class Conversion
                     COALESCE(SUM(payout), 0) AS total_payout
                FROM conversions
               WHERE ts >= :start_of_week
-                AND status = \'approved\''
+                AND status = \'approved\'',
         );
         $statement->bindValue(':start_of_week', $startOfWeek, PDO::PARAM_INT);
         $statement->execute();
@@ -102,7 +102,7 @@ class Conversion
                 AND status = \'approved\'
               GROUP BY DATE(FROM_UNIXTIME(ts))
               ORDER BY day DESC
-              LIMIT :days'
+              LIMIT :days',
         );
         $statement->bindValue(':cutoff', $cutoff, PDO::PARAM_INT);
         $statement->bindValue(':days', $days, PDO::PARAM_INT);
@@ -146,7 +146,7 @@ class Conversion
             "SELECT {$columns}
                FROM conversions
               ORDER BY id DESC
-              LIMIT :limit OFFSET :offset"
+              LIMIT :limit OFFSET :offset",
         );
         $statement->bindValue(':limit', $limit, PDO::PARAM_INT);
         $statement->bindValue(':offset', $offset, PDO::PARAM_INT);
@@ -169,7 +169,7 @@ class Conversion
             'SELECT COUNT(*) FROM information_schema.COLUMNS
              WHERE TABLE_SCHEMA = DATABASE()
                AND TABLE_NAME = :table_name
-               AND COLUMN_NAME = :column_name'
+               AND COLUMN_NAME = :column_name',
         );
         $statement->execute([
             ':table_name' => 'conversions',

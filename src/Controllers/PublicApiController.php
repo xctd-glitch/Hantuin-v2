@@ -6,6 +6,7 @@ namespace SRP\Controllers;
 
 use SRP\Config\Cache;
 use SRP\Config\Environment;
+use SRP\Models\AuditLog;
 use SRP\Models\Conversion;
 use SRP\Models\Settings;
 use SRP\Models\TrafficLog;
@@ -288,7 +289,7 @@ class PublicApiController
                 'reason'   => $result['reason'],
                 'ts'       => time(),
             ],
-            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES
+            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
         );
 
         if (function_exists('fastcgi_finish_request')) {
@@ -355,11 +356,15 @@ class PublicApiController
                     ? self::readBodyString($body, 'country_filter_list', $cfg['country_filter_list'])
                     : $cfg['country_filter_list'],
                 self::readBodyString($body, 'postback_url', $cfg['postback_url']),
-                self::readBodyString($body, 'postback_token', $cfg['postback_token'])
+                self::readBodyString($body, 'postback_token', $cfg['postback_token']),
             );
         } catch (\InvalidArgumentException $e) {
             self::abort(['ok' => false, 'error' => $e->getMessage()], 400);
         }
+
+        /** @var array<string,mixed> $changedKeys */
+        $changedKeys = array_fill_keys(array_keys($body), true);
+        AuditLog::record('settings_update', 'api', $changedKeys);
 
         self::json(['ok' => true]);
     }
@@ -400,7 +405,7 @@ class PublicApiController
             Environment::get('SRP_PUBLIC_API_RATE_WINDOW'),
             self::RATE_WINDOW_DEFAULT,
             self::RATE_WINDOW_MIN,
-            self::RATE_WINDOW_MAX
+            self::RATE_WINDOW_MAX,
         );
     }
 
@@ -410,7 +415,7 @@ class PublicApiController
             Environment::get('SRP_PUBLIC_API_RATE_MAX'),
             self::RATE_MAX_DEFAULT,
             self::RATE_MAX_MIN,
-            self::RATE_MAX_MAX
+            self::RATE_MAX_MAX,
         );
     }
 
@@ -420,7 +425,7 @@ class PublicApiController
             Environment::get('SRP_PUBLIC_API_RATE_HEAVY_MAX'),
             self::RATE_HEAVY_DEFAULT,
             self::RATE_MAX_MIN,
-            self::RATE_MAX_MAX
+            self::RATE_MAX_MAX,
         );
     }
 
@@ -521,7 +526,7 @@ class PublicApiController
         return filter_var(
             $ip,
             FILTER_VALIDATE_IP,
-            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE,
         ) !== false;
     }
 

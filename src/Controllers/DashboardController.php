@@ -41,7 +41,7 @@ class DashboardController
             . "img-src 'self' data:; "
             . "connect-src 'self'; "
             . "frame-ancestors 'none'; "
-            . "base-uri 'self';"
+            . "base-uri 'self';",
         );
 
         require __DIR__ . '/../Views/landing.view.php';

@@ -94,7 +94,7 @@ class TrafficLog
                     SUM(CASE WHEN decision = "A" THEN 1 ELSE 0 END) AS a_count,
                     SUM(CASE WHEN decision = "B" THEN 1 ELSE 0 END) AS b_count
                FROM logs
-              WHERE ts >= :start_of_week'
+              WHERE ts >= :start_of_week',
         );
         $statement->bindValue(':start_of_week', $startOfWeek, PDO::PARAM_INT);
         $statement->execute();
@@ -131,7 +131,7 @@ class TrafficLog
             'SELECT id, ts, ip, ua, click_id, country_code, user_lp, decision
                FROM logs
               ORDER BY id DESC
-              LIMIT :limit OFFSET :offset'
+              LIMIT :limit OFFSET :offset',
         );
         $statement->bindValue(':limit', $limit, PDO::PARAM_INT);
         $statement->bindValue(':offset', $offset, PDO::PARAM_INT);
@@ -192,7 +192,7 @@ class TrafficLog
               WHERE ts >= :cutoff
               GROUP BY DATE(FROM_UNIXTIME(ts))
               ORDER BY day DESC
-              LIMIT :days'
+              LIMIT :days',
         );
         $statement->bindValue(':cutoff', $cutoff, PDO::PARAM_INT);
         $statement->bindValue(':days', $days, PDO::PARAM_INT);
@@ -221,7 +221,7 @@ class TrafficLog
     {
         $connection = Database::getConnection();
         $statement  = $connection->prepare(
-            'SELECT COUNT(*) AS total, MIN(ts) AS oldest, MAX(ts) AS newest FROM logs'
+            'SELECT COUNT(*) AS total, MIN(ts) AS oldest, MAX(ts) AS newest FROM logs',
         );
         $statement->execute();
         $row = $statement->fetch();
@@ -393,7 +393,7 @@ class TrafficLog
         $connection = Database::getConnection();
         $statement  = $connection->prepare(
             'INSERT INTO logs (ts, ip, ua, click_id, country_code, user_lp, decision) VALUES '
-            . implode(', ', $placeholders)
+            . implode(', ', $placeholders),
         );
         $statement->execute($values);
     }
@@ -409,7 +409,7 @@ class TrafficLog
         if (self::$insertStmt === null || self::$insertConn !== $connection) {
             self::$insertStmt = $connection->prepare(
                 'INSERT INTO logs (ts, ip, ua, click_id, country_code, user_lp, decision)
-                 VALUES (:ts, :ip, :ua, :click_id, :country_code, :user_lp, :decision)'
+                 VALUES (:ts, :ip, :ua, :click_id, :country_code, :user_lp, :decision)',
             );
             self::$insertConn = $connection;
         }

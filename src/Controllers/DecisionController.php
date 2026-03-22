@@ -162,7 +162,7 @@ class DecisionController
             : Validator::isCountryAllowed($cc, (string)$cfg['country_filter_mode'], (string)$cfg['country_filter_list']);
 
         // #10 — redirect_url must be a valid, reachable HTTPS URL
-        $redirectUrl  = trim((string)($cfg['redirect_url'] ?? ''));
+        $redirectUrl  = trim((string) $cfg['redirect_url']);
         $redirectValid = $redirectUrl !== ''
             && str_starts_with($redirectUrl, 'https://')
             && filter_var($redirectUrl, FILTER_VALIDATE_URL) !== false;
