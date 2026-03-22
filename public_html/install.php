@@ -2,6 +2,38 @@
 // phpcs:ignoreFile -- Installer entrypoint intentionally mixes bootstrap logic with inline HTML, CSS, and JS.
 declare(strict_types=1);
 
+// ── Early error handler — tangkap fatal error sebagai JSON untuk AJAX ──
+error_reporting(E_ALL);
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+
+set_error_handler(function (int $severity, string $message, string $file, int $line): bool {
+    throw new \ErrorException($message, 0, $severity, $file, $line);
+});
+
+set_exception_handler(function (\Throwable $e): void {
+    $isAjax = (
+        strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'POST'
+        || (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest')
+        || strpos(($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json') !== false
+    );
+    if ($isAjax && !headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=UTF-8');
+        echo json_encode([
+            'ok' => false,
+            'error' => 'PHP Error: ' . $e->getMessage(),
+            'file' => basename($e->getFile()) . ':' . $e->getLine(),
+        ], JSON_UNESCAPED_SLASHES);
+        exit;
+    }
+    // Non-AJAX: tampilkan error sederhana
+    http_response_code(500);
+    echo '<h1>Installer Error</h1><pre>' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</pre>';
+    echo '<p><small>' . htmlspecialchars(basename($e->getFile()), ENT_QUOTES, 'UTF-8') . ':' . $e->getLine() . '</small></p>';
+    exit;
+});
+
 define('ROOT', dirname(__DIR__));
 define('LOCK_FILE', ROOT . '/.installed');
 const STATE_KEY = 'srp_installer';
@@ -16,6 +48,9 @@ $action = $method === 'POST' ? normalizeAction($_POST['action'] ?? null) : '';
 if ($action !== '') {
     handleAction($action);
 }
+
+// Restore default error handler untuk rendering HTML
+restore_error_handler();
 
 $nonce = createNonce();
 sendSecurityHeaders($nonce);
@@ -43,7 +78,7 @@ $dbUser = $state['db']['user'] !== '' ? $state['db']['user'] : fallbackEnv('SRP_
 $adminUser = $state['admin']['user'] !== '' ? $state['admin']['user'] : fallbackEnv('SRP_ADMIN_USER', 'admin');
 $apiKey = $state['api_key'] !== '' ? $state['api_key'] : readEnvValue('SRP_API_KEY');
 
-function handleAction(string $action): never
+function handleAction(string $action): void
 {
     if (!hash_equals(ensureCsrfToken(), (string)($_POST['tok'] ?? ''))) {
         json(['ok' => false, 'error' => 'CSRF token tidak valid. Muat ulang installer.'], 403);
@@ -107,7 +142,7 @@ function handleAction(string $action): never
  *     crons:list<string>
  * } $state
  */
-function runInstall(array $state): never
+function runInstall(array $state): void
 {
     if ($state['db']['host'] === '' || $state['db']['user'] === '' || $state['admin']['user'] === '' || $state['admin']['hash'] === '') {
         json(['ok' => false, 'error' => 'Step database atau admin belum lengkap.'], 409);
@@ -621,7 +656,7 @@ function readEnvValue(string $key): string
         return '';
     }
     foreach ($lines as $line) {
-        if ($line === '' || str_starts_with(trim($line), '#')) {
+        if ($line === '' || strpos(trim($line), '#') === 0) {
             continue;
         }
         [$k, $v] = array_pad(explode('=', $line, 2), 2, '');
@@ -702,7 +737,8 @@ function createNonce(): string
     }
 }
 
-function normalizeAction(mixed $value): string
+/** @param mixed $value */
+function normalizeAction($value): string
 {
     if (!is_scalar($value) && $value !== null) {
         return '';
@@ -711,7 +747,7 @@ function normalizeAction(mixed $value): string
     return preg_match('/\A[a-z_]{1,32}\z/', $action) === 1 ? $action : '';
 }
 
-function redirect(string $to): never
+function redirect(string $to): void
 {
     header('Location: ' . $to, true, 302);
     exit;
@@ -720,7 +756,7 @@ function redirect(string $to): never
 /**
  * @param array<string, mixed> $payload
  */
-function json(array $payload, int $status = 200): never
+function json(array $payload, int $status = 200): void
 {
     // Bersihkan buffer output sebelumnya (jika ada HTML headers terkirim)
     while (ob_get_level() > 0) {
