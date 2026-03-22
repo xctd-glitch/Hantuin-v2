@@ -8,15 +8,17 @@ const STATE_KEY = 'srp_installer';
 const CSRF_KEY = 'srp_installer_csrf';
 
 startInstallerSession();
-$nonce = createNonce();
-sendSecurityHeaders($nonce);
 
 $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 $action = $method === 'POST' ? normalizeAction($_POST['action'] ?? null) : '';
 
+// POST/AJAX: handle early, sebelum kirim HTML headers (cegah 415 conflict)
 if ($action !== '') {
     handleAction($action);
 }
+
+$nonce = createNonce();
+sendSecurityHeaders($nonce);
 
 $state = installerState();
 if (is_file(LOCK_FILE) && !$state['completed']) {
@@ -720,8 +722,17 @@ function redirect(string $to): never
  */
 function json(array $payload, int $status = 200): never
 {
+    // Bersihkan buffer output sebelumnya (jika ada HTML headers terkirim)
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
     http_response_code($status);
-    header('Content-Type: application/json; charset=UTF-8');
+    // Hapus header HTML jika sudah terkirim sebelumnya
+    if (!headers_sent()) {
+        header('Content-Type: application/json; charset=UTF-8');
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        header('X-Content-Type-Options: nosniff');
+    }
     $encoded = json_encode($payload, JSON_UNESCAPED_SLASHES);
     echo $encoded === false ? '{"ok":false,"error":"JSON encoding gagal."}' : $encoded;
     exit;
@@ -1364,10 +1375,26 @@ async function callApi(action, payload) {
         }
     }
     try {
-        var response = await fetch(window.location.pathname, {method: 'POST', body: fd, credentials: 'same-origin', headers: {'Accept': 'application/json'}});
-        return await response.json();
+        var response = await fetch(window.location.pathname, {
+            method: 'POST',
+            body: fd,
+            credentials: 'same-origin',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        });
+        if (!response.ok && response.status === 415) {
+            return {ok: false, error: 'Server menolak request (415). Cek konfigurasi proxy/CDN.'};
+        }
+        var text = await response.text();
+        try {
+            return JSON.parse(text);
+        } catch (parseErr) {
+            return {ok: false, error: 'Response bukan JSON. Server mungkin mengembalikan error page. Status: ' + response.status};
+        }
     } catch (error) {
-        return {ok: false, error: 'Request installer gagal.'};
+        return {ok: false, error: 'Request installer gagal: ' + (error.message || 'network error')};
     }
 }
 
