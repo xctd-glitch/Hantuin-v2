@@ -56,7 +56,7 @@ class SrpClient
         ?int $backoffBaseMs = null,
         ?int $backoffMaxMs = null,
         ?int $responseCacheSeconds = null,
-        ?int $inflightWaitMs = null
+        ?int $inflightWaitMs = null,
     ) {
         $configuredApiUrl = trim((string)(getenv('SRP_REMOTE_DECISION_URL') ?: getenv('SRP_API_URL') ?: ''));
         if ($configuredApiUrl === '') {
@@ -73,98 +73,98 @@ class SrpClient
             getenv('SRP_API_TIMEOUT'),
             self::DEFAULT_TIMEOUT_SECONDS,
             self::MIN_TIMEOUT_SECONDS,
-            self::MAX_TIMEOUT_SECONDS
+            self::MAX_TIMEOUT_SECONDS,
         );
         $configuredConnectTimeoutSeconds = self::normalizeIntSetting(
             getenv('SRP_API_CONNECT_TIMEOUT'),
             self::DEFAULT_CONNECT_TIMEOUT_SECONDS,
             self::MIN_CONNECT_TIMEOUT_SECONDS,
-            self::MAX_CONNECT_TIMEOUT_SECONDS
+            self::MAX_CONNECT_TIMEOUT_SECONDS,
         );
         $configuredFailureCooldownSeconds = self::normalizeIntSetting(
             getenv('SRP_API_FAILURE_COOLDOWN'),
             self::DEFAULT_FAILURE_COOLDOWN_SECONDS,
             self::MIN_FAILURE_COOLDOWN_SECONDS,
-            self::MAX_FAILURE_COOLDOWN_SECONDS
+            self::MAX_FAILURE_COOLDOWN_SECONDS,
         );
         $configuredMaxRetries = self::normalizeIntSetting(
             getenv('SRP_API_MAX_RETRIES'),
             self::DEFAULT_MAX_RETRIES,
             self::MIN_MAX_RETRIES,
-            self::MAX_MAX_RETRIES
+            self::MAX_MAX_RETRIES,
         );
         $configuredBackoffBaseMs = self::normalizeIntSetting(
             getenv('SRP_API_BACKOFF_BASE_MS'),
             self::DEFAULT_BACKOFF_BASE_MS,
             self::MIN_BACKOFF_BASE_MS,
-            self::MAX_BACKOFF_BASE_MS
+            self::MAX_BACKOFF_BASE_MS,
         );
         $configuredBackoffMaxMs = self::normalizeIntSetting(
             getenv('SRP_API_BACKOFF_MAX_MS'),
             self::DEFAULT_BACKOFF_MAX_MS,
             self::MIN_BACKOFF_MAX_MS,
-            self::MAX_BACKOFF_MAX_MS
+            self::MAX_BACKOFF_MAX_MS,
         );
         $configuredResponseCacheSeconds = self::normalizeIntSetting(
             getenv('SRP_API_RESPONSE_CACHE_SECONDS'),
             self::DEFAULT_RESPONSE_CACHE_SECONDS,
             self::MIN_RESPONSE_CACHE_SECONDS,
-            self::MAX_RESPONSE_CACHE_SECONDS
+            self::MAX_RESPONSE_CACHE_SECONDS,
         );
         $configuredInflightWaitMs = self::normalizeIntSetting(
             getenv('SRP_API_INFLIGHT_WAIT_MS'),
             self::DEFAULT_INFLIGHT_WAIT_MS,
             self::MIN_INFLIGHT_WAIT_MS,
-            self::MAX_INFLIGHT_WAIT_MS
+            self::MAX_INFLIGHT_WAIT_MS,
         );
 
         $this->timeoutSeconds = self::normalizeIntSetting(
             $timeoutSeconds,
             $configuredTimeoutSeconds,
             self::MIN_TIMEOUT_SECONDS,
-            self::MAX_TIMEOUT_SECONDS
+            self::MAX_TIMEOUT_SECONDS,
         );
         $this->connectTimeoutSeconds = self::normalizeIntSetting(
             $connectTimeoutSeconds,
             $configuredConnectTimeoutSeconds,
             self::MIN_CONNECT_TIMEOUT_SECONDS,
-            self::MAX_CONNECT_TIMEOUT_SECONDS
+            self::MAX_CONNECT_TIMEOUT_SECONDS,
         );
         $this->failureCooldownSeconds = self::normalizeIntSetting(
             $failureCooldownSeconds,
             $configuredFailureCooldownSeconds,
             self::MIN_FAILURE_COOLDOWN_SECONDS,
-            self::MAX_FAILURE_COOLDOWN_SECONDS
+            self::MAX_FAILURE_COOLDOWN_SECONDS,
         );
         $this->maxRetries = self::normalizeIntSetting(
             $maxRetries,
             $configuredMaxRetries,
             self::MIN_MAX_RETRIES,
-            self::MAX_MAX_RETRIES
+            self::MAX_MAX_RETRIES,
         );
         $this->backoffBaseMs = self::normalizeIntSetting(
             $backoffBaseMs,
             $configuredBackoffBaseMs,
             self::MIN_BACKOFF_BASE_MS,
-            self::MAX_BACKOFF_BASE_MS
+            self::MAX_BACKOFF_BASE_MS,
         );
         $this->backoffMaxMs = self::normalizeIntSetting(
             $backoffMaxMs,
             $configuredBackoffMaxMs,
             self::MIN_BACKOFF_MAX_MS,
-            self::MAX_BACKOFF_MAX_MS
+            self::MAX_BACKOFF_MAX_MS,
         );
         $this->responseCacheSeconds = self::normalizeIntSetting(
             $responseCacheSeconds,
             $configuredResponseCacheSeconds,
             self::MIN_RESPONSE_CACHE_SECONDS,
-            self::MAX_RESPONSE_CACHE_SECONDS
+            self::MAX_RESPONSE_CACHE_SECONDS,
         );
         $this->inflightWaitMs = self::normalizeIntSetting(
             $inflightWaitMs,
             $configuredInflightWaitMs,
             self::MIN_INFLIGHT_WAIT_MS,
-            self::MAX_INFLIGHT_WAIT_MS
+            self::MAX_INFLIGHT_WAIT_MS,
         );
     }
 
@@ -371,7 +371,7 @@ class SrpClient
         return filter_var(
             $ip,
             FILTER_VALIDATE_IP,
-            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE,
         ) !== false;
     }
 
@@ -562,7 +562,7 @@ class SrpClient
             $raw = @file_get_contents(
                 'http://ip-api.com/json/' . urlencode($ip) . '?fields=status,countryCode',
                 false,
-                $ctx
+                $ctx,
             );
         } catch (\Throwable) {
             $raw = false;
@@ -797,7 +797,7 @@ class SrpClient
         try {
             $payload = json_encode(
                 ['until' => $expiresAt, 'data' => $data],
-                JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE
+                JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE,
             );
             file_put_contents($cacheFilePath, $payload, LOCK_EX);
         } catch (\Throwable $e) {

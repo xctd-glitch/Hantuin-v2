@@ -259,7 +259,7 @@ class EnvConfig
             // ── Strategy 1: plain HTTP to 127.0.0.1 ─────────────────────────────
             [$code1, $err1, $body1] = self::curlGet(
                 'http://127.0.0.1' . $apiPath,
-                array_merge($headers, ['Host: ' . $host])
+                array_merge($headers, ['Host: ' . $host]),
             );
 
             if ($err1 === '') {
@@ -285,7 +285,7 @@ class EnvConfig
                     CURLOPT_RESOLVE        => ["{$host}:{$urlPort}:127.0.0.1"],
                     CURLOPT_SSL_VERIFYPEER => false,
                     CURLOPT_SSL_VERIFYHOST => 0,
-                ]
+                ],
             );
 
             if ($err2 !== '') {
@@ -406,70 +406,70 @@ class EnvConfig
         $c .= "# ===================================================================\n\n";
 
         $c .= "# ── Application ────────────────────────────────────────────────────\n";
-        $c .= "APP_URL="      . ($vars['APP_URL']      ?? '')           . "\n";
-        $c .= "APP_ENV="      . ($vars['APP_ENV']      ?? 'production') . "\n";
-        $c .= "APP_DEBUG="    . ($vars['APP_DEBUG']    ?? 'false')      . "\n";
-        $c .= "SRP_ENV="      . ($vars['SRP_ENV']      ?? 'production') . "\n";
-        $c .= "SRP_ENV_FILE=" . ($vars['SRP_ENV_FILE'] ?? '')           . "\n\n";
+        $c .= 'APP_URL='      . ($vars['APP_URL']      ?? '')           . "\n";
+        $c .= 'APP_ENV='      . ($vars['APP_ENV']      ?? 'production') . "\n";
+        $c .= 'APP_DEBUG='    . ($vars['APP_DEBUG']    ?? 'false')      . "\n";
+        $c .= 'SRP_ENV='      . ($vars['SRP_ENV']      ?? 'production') . "\n";
+        $c .= 'SRP_ENV_FILE=' . ($vars['SRP_ENV_FILE'] ?? '')           . "\n\n";
 
         $c .= "# ── Database ───────────────────────────────────────────────────────\n";
-        $c .= "SRP_DB_HOST="   . ($vars['SRP_DB_HOST']   ?? '127.0.0.1') . "\n";
-        $c .= "SRP_DB_PORT="   . ($vars['SRP_DB_PORT']   ?? '3306')       . "\n";
-        $c .= "SRP_DB_NAME="   . ($vars['SRP_DB_NAME']   ?? '')           . "\n";
-        $c .= "SRP_DB_USER="   . ($vars['SRP_DB_USER']   ?? '')           . "\n";
-        $c .= "SRP_DB_PASS="   . ($vars['SRP_DB_PASS']   ?? '')           . "\n";
-        $c .= "SRP_DB_SOCKET=" . ($vars['SRP_DB_SOCKET'] ?? '')           . "\n\n";
+        $c .= 'SRP_DB_HOST='   . ($vars['SRP_DB_HOST']   ?? '127.0.0.1') . "\n";
+        $c .= 'SRP_DB_PORT='   . ($vars['SRP_DB_PORT']   ?? '3306')       . "\n";
+        $c .= 'SRP_DB_NAME='   . ($vars['SRP_DB_NAME']   ?? '')           . "\n";
+        $c .= 'SRP_DB_USER='   . ($vars['SRP_DB_USER']   ?? '')           . "\n";
+        $c .= 'SRP_DB_PASS='   . ($vars['SRP_DB_PASS']   ?? '')           . "\n";
+        $c .= 'SRP_DB_SOCKET=' . ($vars['SRP_DB_SOCKET'] ?? '')           . "\n\n";
 
         $c .= "# ── API Keys ───────────────────────────────────────────────────────\n";
-        $c .= "SRP_API_KEY=" . ($vars['SRP_API_KEY'] ?? '') . "\n\n";
+        $c .= 'SRP_API_KEY=' . ($vars['SRP_API_KEY'] ?? '') . "\n\n";
         $c .= "# Remote Decision Server (S2S)\n";
-        $c .= "SRP_REMOTE_DECISION_URL=" . ($vars['SRP_REMOTE_DECISION_URL'] ?? '') . "\n";
-        $c .= "SRP_REMOTE_API_KEY="      . ($vars['SRP_REMOTE_API_KEY']      ?? '') . "\n\n";
+        $c .= 'SRP_REMOTE_DECISION_URL=' . ($vars['SRP_REMOTE_DECISION_URL'] ?? '') . "\n";
+        $c .= 'SRP_REMOTE_API_KEY='      . ($vars['SRP_REMOTE_API_KEY']      ?? '') . "\n\n";
 
         $c .= "# ── API Client Tuning ──────────────────────────────────────────────\n";
-        $c .= "SRP_API_TIMEOUT="                . ($vars['SRP_API_TIMEOUT']                ?? '8')    . "\n";
-        $c .= "SRP_API_CONNECT_TIMEOUT="        . ($vars['SRP_API_CONNECT_TIMEOUT']        ?? '3')    . "\n";
-        $c .= "SRP_API_FAILURE_COOLDOWN="       . ($vars['SRP_API_FAILURE_COOLDOWN']       ?? '30')   . "\n";
-        $c .= "SRP_API_MAX_RETRIES="            . ($vars['SRP_API_MAX_RETRIES']            ?? '0')    . "\n";
-        $c .= "SRP_API_BACKOFF_BASE_MS="        . ($vars['SRP_API_BACKOFF_BASE_MS']        ?? '250')  . "\n";
-        $c .= "SRP_API_BACKOFF_MAX_MS="         . ($vars['SRP_API_BACKOFF_MAX_MS']         ?? '1500') . "\n";
-        $c .= "SRP_API_RESPONSE_CACHE_SECONDS=" . ($vars['SRP_API_RESPONSE_CACHE_SECONDS'] ?? '3')    . "\n";
-        $c .= "SRP_API_INFLIGHT_WAIT_MS="       . ($vars['SRP_API_INFLIGHT_WAIT_MS']       ?? '300')  . "\n\n";
+        $c .= 'SRP_API_TIMEOUT='                . ($vars['SRP_API_TIMEOUT']                ?? '8')    . "\n";
+        $c .= 'SRP_API_CONNECT_TIMEOUT='        . ($vars['SRP_API_CONNECT_TIMEOUT']        ?? '3')    . "\n";
+        $c .= 'SRP_API_FAILURE_COOLDOWN='       . ($vars['SRP_API_FAILURE_COOLDOWN']       ?? '30')   . "\n";
+        $c .= 'SRP_API_MAX_RETRIES='            . ($vars['SRP_API_MAX_RETRIES']            ?? '0')    . "\n";
+        $c .= 'SRP_API_BACKOFF_BASE_MS='        . ($vars['SRP_API_BACKOFF_BASE_MS']        ?? '250')  . "\n";
+        $c .= 'SRP_API_BACKOFF_MAX_MS='         . ($vars['SRP_API_BACKOFF_MAX_MS']         ?? '1500') . "\n";
+        $c .= 'SRP_API_RESPONSE_CACHE_SECONDS=' . ($vars['SRP_API_RESPONSE_CACHE_SECONDS'] ?? '3')    . "\n";
+        $c .= 'SRP_API_INFLIGHT_WAIT_MS='       . ($vars['SRP_API_INFLIGHT_WAIT_MS']       ?? '300')  . "\n\n";
 
         $c .= "# ── VPN Check ─────────────────────────────────────────────────────\n";
-        $c .= "SRP_VPN_CHECK_ENABLED=" . ($vars['SRP_VPN_CHECK_ENABLED'] ?? '1') . "\n\n";
+        $c .= 'SRP_VPN_CHECK_ENABLED=' . ($vars['SRP_VPN_CHECK_ENABLED'] ?? '1') . "\n\n";
 
         $c .= "# ── Rate Limiting ──────────────────────────────────────────────────\n";
-        $c .= "SRP_PUBLIC_API_RATE_WINDOW="    . ($vars['SRP_PUBLIC_API_RATE_WINDOW']    ?? '60')   . "\n";
-        $c .= "SRP_PUBLIC_API_RATE_MAX="       . ($vars['SRP_PUBLIC_API_RATE_MAX']       ?? '1000') . "\n";
-        $c .= "SRP_PUBLIC_API_RATE_HEAVY_MAX=" . ($vars['SRP_PUBLIC_API_RATE_HEAVY_MAX'] ?? '30')   . "\n";
-        $c .= "RATE_LIMIT_ATTEMPTS="           . ($vars['RATE_LIMIT_ATTEMPTS']           ?? '5')    . "\n";
-        $c .= "RATE_LIMIT_WINDOW="             . ($vars['RATE_LIMIT_WINDOW']             ?? '900')  . "\n\n";
+        $c .= 'SRP_PUBLIC_API_RATE_WINDOW='    . ($vars['SRP_PUBLIC_API_RATE_WINDOW']    ?? '60')   . "\n";
+        $c .= 'SRP_PUBLIC_API_RATE_MAX='       . ($vars['SRP_PUBLIC_API_RATE_MAX']       ?? '1000') . "\n";
+        $c .= 'SRP_PUBLIC_API_RATE_HEAVY_MAX=' . ($vars['SRP_PUBLIC_API_RATE_HEAVY_MAX'] ?? '30')   . "\n";
+        $c .= 'RATE_LIMIT_ATTEMPTS='           . ($vars['RATE_LIMIT_ATTEMPTS']           ?? '5')    . "\n";
+        $c .= 'RATE_LIMIT_WINDOW='             . ($vars['RATE_LIMIT_WINDOW']             ?? '900')  . "\n\n";
 
         $c .= "# ── Admin Credentials ──────────────────────────────────────────────\n";
-        $c .= "SRP_ADMIN_USER="          . ($vars['SRP_ADMIN_USER']          ?? 'admin') . "\n";
-        $c .= "SRP_ADMIN_PASSWORD_HASH=" . ($vars['SRP_ADMIN_PASSWORD_HASH'] ?? '')      . "\n";
-        $c .= "SRP_ADMIN_PASSWORD="      . ($vars['SRP_ADMIN_PASSWORD']      ?? '')      . "\n\n";
-        $c .= "SRP_USER_USER="           . ($vars['SRP_USER_USER']           ?? '')      . "\n";
-        $c .= "SRP_USER_PASSWORD_HASH="  . ($vars['SRP_USER_PASSWORD_HASH']  ?? '')      . "\n";
-        $c .= "SRP_USER_PASSWORD="       . ($vars['SRP_USER_PASSWORD']       ?? '')      . "\n\n";
+        $c .= 'SRP_ADMIN_USER='          . ($vars['SRP_ADMIN_USER']          ?? 'admin') . "\n";
+        $c .= 'SRP_ADMIN_PASSWORD_HASH=' . ($vars['SRP_ADMIN_PASSWORD_HASH'] ?? '')      . "\n";
+        $c .= 'SRP_ADMIN_PASSWORD='      . ($vars['SRP_ADMIN_PASSWORD']      ?? '')      . "\n\n";
+        $c .= 'SRP_USER_USER='           . ($vars['SRP_USER_USER']           ?? '')      . "\n";
+        $c .= 'SRP_USER_PASSWORD_HASH='  . ($vars['SRP_USER_PASSWORD_HASH']  ?? '')      . "\n";
+        $c .= 'SRP_USER_PASSWORD='       . ($vars['SRP_USER_PASSWORD']       ?? '')      . "\n\n";
 
         $c .= "# ── Security ───────────────────────────────────────────────────────\n";
-        $c .= "SRP_TRUSTED_PROXIES="      . ($vars['SRP_TRUSTED_PROXIES']      ?? '')     . "\n";
-        $c .= "SRP_FORCE_SECURE_COOKIES=" . ($vars['SRP_FORCE_SECURE_COOKIES'] ?? 'true') . "\n\n";
+        $c .= 'SRP_TRUSTED_PROXIES='      . ($vars['SRP_TRUSTED_PROXIES']      ?? '')     . "\n";
+        $c .= 'SRP_FORCE_SECURE_COOKIES=' . ($vars['SRP_FORCE_SECURE_COOKIES'] ?? 'true') . "\n\n";
 
         $c .= "# ── Cache ──────────────────────────────────────────────────────────\n";
-        $c .= "CACHE_DRIVER="    . ($vars['CACHE_DRIVER']    ?? '')          . "\n";
-        $c .= "CACHE_PREFIX="    . ($vars['CACHE_PREFIX']    ?? 'srp_')      . "\n";
-        $c .= "REDIS_HOST="      . ($vars['REDIS_HOST']      ?? '127.0.0.1') . "\n";
-        $c .= "REDIS_PORT="      . ($vars['REDIS_PORT']      ?? '6379')      . "\n";
-        $c .= "REDIS_PASSWORD="  . ($vars['REDIS_PASSWORD']  ?? '')          . "\n";
-        $c .= "REDIS_DB="        . ($vars['REDIS_DB']        ?? '0')         . "\n";
-        $c .= "MEMCACHED_HOST="  . ($vars['MEMCACHED_HOST']  ?? '127.0.0.1') . "\n";
-        $c .= "MEMCACHED_PORT="  . ($vars['MEMCACHED_PORT']  ?? '11211')     . "\n\n";
+        $c .= 'CACHE_DRIVER='    . ($vars['CACHE_DRIVER']    ?? '')          . "\n";
+        $c .= 'CACHE_PREFIX='    . ($vars['CACHE_PREFIX']    ?? 'srp_')      . "\n";
+        $c .= 'REDIS_HOST='      . ($vars['REDIS_HOST']      ?? '127.0.0.1') . "\n";
+        $c .= 'REDIS_PORT='      . ($vars['REDIS_PORT']      ?? '6379')      . "\n";
+        $c .= 'REDIS_PASSWORD='  . ($vars['REDIS_PASSWORD']  ?? '')          . "\n";
+        $c .= 'REDIS_DB='        . ($vars['REDIS_DB']        ?? '0')         . "\n";
+        $c .= 'MEMCACHED_HOST='  . ($vars['MEMCACHED_HOST']  ?? '127.0.0.1') . "\n";
+        $c .= 'MEMCACHED_PORT='  . ($vars['MEMCACHED_PORT']  ?? '11211')     . "\n\n";
 
         $c .= "# ── Session ────────────────────────────────────────────────────────\n";
-        $c .= "SESSION_LIFETIME=" . ($vars['SESSION_LIFETIME'] ?? '3600') . "\n";
+        $c .= 'SESSION_LIFETIME=' . ($vars['SESSION_LIFETIME'] ?? '3600') . "\n";
 
         // Preserve any unknown keys that were already in the file
         $standardKeys = [

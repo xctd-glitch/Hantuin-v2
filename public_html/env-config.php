@@ -66,7 +66,7 @@ try {
             $config = EnvConfig::getAllMasked();
             echo json_encode([
                 'ok' => true,
-                'config' => $config
+                'config' => $config,
             ]);
             break;
 
@@ -75,7 +75,7 @@ try {
             $groups = EnvConfig::getConfigGroups();
             echo json_encode([
                 'ok' => true,
-                'groups' => $groups
+                'groups' => $groups,
             ]);
             break;
 
@@ -87,7 +87,7 @@ try {
             if (empty($newConfig)) {
                 echo json_encode([
                     'ok' => false,
-                    'error' => 'No configuration provided'
+                    'error' => 'No configuration provided',
                 ]);
                 break;
             }
@@ -97,12 +97,12 @@ try {
             if ($success) {
                 echo json_encode([
                     'ok' => true,
-                    'message' => 'Environment configuration updated successfully'
+                    'message' => 'Environment configuration updated successfully',
                 ]);
             } else {
                 echo json_encode([
                     'ok' => false,
-                    'error' => 'Failed to update environment configuration'
+                    'error' => 'Failed to update environment configuration',
                 ]);
             }
             break;
@@ -123,7 +123,7 @@ try {
         default:
             echo json_encode([
                 'ok' => false,
-                'error' => 'Invalid action'
+                'error' => 'Invalid action',
             ]);
             break;
     }
@@ -131,6 +131,6 @@ try {
     error_log('EnvConfig API error: ' . $e->getMessage());
     echo json_encode([
         'ok' => false,
-        'error' => 'Internal server error'
+        'error' => 'Internal server error',
     ]);
 }

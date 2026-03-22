@@ -39,7 +39,7 @@ $params = array_merge($_GET, $method === 'POST' ? $_POST : []);
 
 // ── Token validation ───────────────────────────────────────────────────────────
 $cfg   = Settings::get();
-$token = trim((string)($cfg['postback_token'] ?? ''));
+$token = trim((string) $cfg['postback_token']);
 $given = trim((string)($params['token'] ?? ''));
 
 if ($token === '' || $given === '' || !hash_equals($token, $given)) {

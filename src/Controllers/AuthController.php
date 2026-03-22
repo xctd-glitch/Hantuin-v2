@@ -6,6 +6,7 @@ namespace SRP\Controllers;
 
 use SRP\Config\Environment;
 use SRP\Middleware\Session;
+use SRP\Models\AuditLog;
 
 class AuthController
 {
@@ -35,7 +36,7 @@ class AuthController
                 $adminPlain,
                 $viewerUser,
                 $viewerHash,
-                $viewerPlain
+                $viewerPlain,
             );
         }
 
@@ -58,6 +59,9 @@ class AuthController
             http_response_code(400);
             exit('Invalid session token.');
         }
+
+        $actor = (string) ($_SESSION['srp_admin_id'] ?? '');
+        AuditLog::record('logout', $actor);
 
         $_SESSION = [];
 
@@ -85,7 +89,7 @@ class AuthController
         string $adminPlain,
         string $viewerUser,
         string $viewerHash,
-        string $viewerPlain
+        string $viewerPlain,
     ): string {
         $providedToken = (string)($_POST['csrf_token'] ?? '');
         if ($csrfToken === '' || !hash_equals($csrfToken, $providedToken)) {
@@ -134,6 +138,8 @@ class AuthController
         session_regenerate_id(true);
         $_SESSION['srp_admin_id'] = $username;
         $_SESSION['srp_role'] = $role;
+
+        AuditLog::record('login', $username, ['role' => $role]);
 
         if ($remember) {
             $params = session_get_cookie_params();

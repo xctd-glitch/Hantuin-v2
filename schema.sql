@@ -136,6 +136,21 @@ CREATE TABLE IF NOT EXISTS `conversions` (
   INDEX `idx_conv_click_id` (`click_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- -------------------------------------------------------------
+-- audit_logs
+-- Admin action audit trail — login, logout, settings changes.
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `audit_logs` (
+  `id`      BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  `ts`      INT UNSIGNED     NOT NULL,
+  `action`  VARCHAR(50)      NOT NULL,
+  `actor`   VARCHAR(100)     NOT NULL DEFAULT '',
+  `ip`      VARCHAR(45)      NOT NULL DEFAULT '',
+  `context` TEXT             NOT NULL,
+  PRIMARY KEY (`id`),
+  INDEX `idx_audit_ts` (`ts`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET @conv_has_country := (
   SELECT COUNT(*)
   FROM information_schema.COLUMNS
