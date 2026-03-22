@@ -1,0 +1,60 @@
+# ===================================================================
+# SRP v2.1 — Tracking Domain .htaccess
+# ===================================================================
+# Taruh file ini di root TRACKING DOMAIN (sebelah entry.php).
+# Rename jadi .htaccess
+# ===================================================================
+
+Options -Indexes
+Options -MultiViews
+DirectoryIndex entry.php
+
+# ── Content Type fix (cegah 415) ─────────────────────────────────
+<IfModule mod_mime.c>
+    AddType application/x-httpd-php .php
+</IfModule>
+
+# ── Security Headers ─────────────────────────────────────────────
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set Referrer-Policy "no-referrer"
+    Header always unset X-Powered-By
+    Header always unset Server
+</IfModule>
+
+# ── Rewrite: semua traffic ke entry.php ──────────────────────────
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Force HTTPS (uncomment di production)
+    # RewriteCond %{HTTPS} !=on
+    # RewriteCond %{HTTP:X-Forwarded-Proto} !https
+    # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # Serve real files as-is (favicon, robots.txt, etc.)
+    RewriteCond %{REQUEST_FILENAME} -f
+    RewriteRule ^ - [L]
+
+    # Semua request lain → entry.php
+    RewriteRule ^(.*)$ entry.php [L,QSA]
+</IfModule>
+
+# ── Deny sensitive files ─────────────────────────────────────────
+<IfModule mod_authz_core.c>
+    <FilesMatch "^\.env">
+        Require all denied
+    </FilesMatch>
+    <FilesMatch "^\.">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+<IfModule !mod_authz_core.c>
+    <FilesMatch "^\.">
+        Order deny,allow
+        Deny from all
+    </FilesMatch>
+</IfModule>
+
+ErrorDocument 404 "404"

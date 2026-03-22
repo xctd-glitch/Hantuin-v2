@@ -1,122 +1,226 @@
 # ===================================================================
-# SRP Web Application Configuration
+# SRP v2.1 — public_html/.htaccess
+# ===================================================================
+# Web root configuration untuk Apache / LiteSpeed.
+# Handles: security headers, caching, compression, routing, CORS,
+#          Content-Type fix (415 prevention), trusted proxy support.
 # ===================================================================
 
-# Basic options
+# ── BASIC OPTIONS ────────────────────────────────────────────────
 Options -Indexes
 Options -MultiViews
-
-# Root "/" pakai index.php
 DirectoryIndex index.php
 
-# ===================================================================
-# ENVIRONMENT VARIABLES
-# ===================================================================
-# ===================================================================
-# SECURITY & CACHING HEADERS
-# ===================================================================
+# ── PHP SETTINGS (shared hosting override) ───────────────────────
+<IfModule mod_php.c>
+    php_value max_execution_time 30
+    php_value memory_limit 128M
+    php_value post_max_size 8M
+    php_value upload_max_filesize 2M
+    php_flag display_errors Off
+    php_flag log_errors On
+</IfModule>
+
+# ── CONTENT TYPE — cegah 415 Unsupported Media Type ──────────────
+# LiteSpeed/OpenResty kadang reject request ke .php jika Content-Type
+# tidak dikenali. Pastikan .php selalu diproses sebagai PHP.
+<IfModule mod_mime.c>
+    AddType application/x-httpd-php .php
+    AddType application/x-httpd-php-source .phps
+</IfModule>
+
+# Force handler untuk PHP (LiteSpeed compatibility)
+<FilesMatch "\.php$">
+    <IfModule mod_proxy_fcgi.c>
+        SetHandler "proxy:unix:/var/run/php-fpm.sock|fcgi://localhost"
+    </IfModule>
+    <IfModule !mod_proxy_fcgi.c>
+        SetHandler application/x-httpd-php
+    </IfModule>
+</FilesMatch>
+
+# ── SECURITY HEADERS ─────────────────────────────────────────────
 <IfModule mod_headers.c>
-    # Security headers
+    # Clickjacking protection
     Header always set X-Frame-Options "DENY"
+
+    # MIME type sniffing protection
     Header always set X-Content-Type-Options "nosniff"
+
+    # XSS protection (legacy browsers)
+    Header always set X-XSS-Protection "1; mode=block"
+
+    # Referrer policy
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
 
-    # Disable caching untuk PHP (dinamis)
+    # Permissions policy (disable unused browser features)
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+
+    # HSTS — force HTTPS (uncomment di production)
+    # Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
+    # Hapus header server info (jika bisa)
+    Header always unset X-Powered-By
+    Header always unset Server
+</IfModule>
+
+# ── CACHING ──────────────────────────────────────────────────────
+<IfModule mod_headers.c>
+    # PHP responses: no cache
     <FilesMatch "\.(php)$">
         Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
         Header set Pragma "no-cache"
     </FilesMatch>
 
-    # Cache statis 1 tahun
-    <FilesMatch "\.(jpe?g|png|gif|ico|css|js|woff2?|ttf|svg)$">
-        Header set Cache-Control "max-age=31536000, public"
+    # Static assets: cache 1 year
+    <FilesMatch "\.(jpe?g|png|gif|ico|webp|avif|css|js|woff2?|ttf|eot|otf|svg)$">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </FilesMatch>
+
+    # Service worker: no cache (harus selalu fresh)
+    <FilesMatch "service-worker\.js$">
+        Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+    </FilesMatch>
+
+    # Manifest: cache 1 day
+    <FilesMatch "manifest\.json$">
+        Header set Cache-Control "public, max-age=86400"
     </FilesMatch>
 </IfModule>
 
-# ===================================================================
-# COMPRESSION
-# ===================================================================
+# ── COMPRESSION ──────────────────────────────────────────────────
 <IfModule mod_deflate.c>
     AddOutputFilterByType DEFLATE \
-        text/html text/plain text/xml text/css text/javascript \
-        application/javascript application/json
+        text/html \
+        text/plain \
+        text/xml \
+        text/css \
+        text/javascript \
+        application/javascript \
+        application/json \
+        application/xml \
+        application/xhtml+xml \
+        image/svg+xml \
+        font/woff2 \
+        font/woff
 </IfModule>
 
-# ===================================================================
-# CONTENT TYPE HANDLING
-# ===================================================================
-# Pastikan PHP dikenali oleh LiteSpeed/OpenResty proxy
-<IfModule mod_mime.c>
-    AddType application/x-httpd-php .php
+# LiteSpeed compression (jika mod_deflate tidak ada)
+<IfModule LiteSpeed>
+    CacheDisable public /api/
+    CacheDisable public /decision.php
+    CacheDisable public /postback.php
 </IfModule>
 
-# Izinkan semua Content-Type untuk PHP endpoints (cegah 415)
+# ── CORS — untuk API endpoints ───────────────────────────────────
 <IfModule mod_headers.c>
-    <FilesMatch "\.(php)$">
-        Header always set Accept-Ranges "none"
+    <FilesMatch "(api|decision|postback|data)\.php$">
+        Header always set Access-Control-Allow-Origin "*"
+        Header always set Access-Control-Allow-Methods "GET, POST, OPTIONS"
+        Header always set Access-Control-Allow-Headers "Content-Type, X-API-Key, X-Requested-With, Authorization"
+        Header always set Access-Control-Max-Age "3600"
     </FilesMatch>
 </IfModule>
 
-# ===================================================================
-# URL REWRITING / ROUTING
-# ===================================================================
+# Handle preflight OPTIONS request
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_METHOD} OPTIONS
+    RewriteRule ^(api|decision|postback|data)\.php$ - [R=204,L]
+</IfModule>
+
+# ── URL REWRITING / ROUTING ──────────────────────────────────────
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteBase /
 
-    # Blok akses VCS & src (Directory* gak boleh di .htaccess)
-    RewriteRule ^(?:\.git|\.svn)/ - [F,L]
-    RewriteRule ^src/ - [F,L]
+    # ─── Security: blok akses ke direktori sensitif ───
+    RewriteRule ^(?:\.git|\.svn|\.hg)/ - [F,L]
+    RewriteRule ^(?:src|cron|backups|logs|storage|vendor)/ - [F,L]
+    RewriteRule ^(?:node_modules|\.claude)/ - [F,L]
 
-    # Public API v1: /api/v1/{endpoint} → api.php with PATH_INFO
+    # ─── Force HTTPS (uncomment di production) ───
+    # RewriteCond %{HTTPS} !=on
+    # RewriteCond %{HTTP:X-Forwarded-Proto} !https
+    # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # ─── API routing ───
+    # /api/v1/{endpoint} → api.php with PATH_INFO
     RewriteRule ^api/v1/?(.*)$ api.php/$1 [L,QSA]
 
-    # Visitor routing entry point: /_meetups/?click_id=...&user_lp=... → landing.php
+    # ─── Campaign short URLs ───
+    # /l/campaignname → landing.php?user_lp=campaignname
+    RewriteRule ^l/([a-zA-Z0-9_-]+)/?$ landing.php?user_lp=$1 [L,QSA]
+
+    # ─── Meetup tracking entry ───
     RewriteRule ^_meetups/?$ landing.php [L,QSA]
 
-    # Short URL: /l/campaignname → landing.php?user_lp=campaignname
-    RewriteRule ^l/([a-zA-Z0-9_-]+)$ landing.php?user_lp=$1 [L,QSA]
+    # ─── Clean URL aliases ───
+    RewriteRule ^login/?$ login.php [L,QSA]
+    RewriteRule ^landing/?$ landing.php [L,QSA]
+    RewriteRule ^stats/?$ stats.php [L,QSA]
+    RewriteRule ^decision/?$ decision.php [L,QSA]
+    RewriteRule ^postback/?$ postback.php [L,QSA]
 
-    # Root "/" → index.php (redundant dgn DirectoryIndex, tapi eksplisit)
+    # ─── Root ───
     RewriteRule ^$ index.php [L,QSA]
 
-    # "/login" → login.php
-    RewriteRule ^login/?$ login.php [L,QSA]
-
-    # "/landing" → landing.php
-    RewriteRule ^landing/?$ landing.php [L,QSA]
-
-    # Serve file/direktori asli apa adanya
+    # ─── Serve real files/directories as-is ───
     RewriteCond %{REQUEST_FILENAME} -f [OR]
     RewriteCond %{REQUEST_FILENAME} -d
     RewriteRule ^ - [L]
 
-    # (Opsional) front controller:
-    # Semua URL lain tembak ke index.php
-    #RewriteRule ^(.+)$ index.php [L,QSA]
+    # ─── Catch-all: 404 (uncomment untuk front controller) ───
+    # RewriteRule ^(.+)$ index.php [L,QSA]
 </IfModule>
 
-# ===================================================================
-# DENY ACCESS TO SENSITIVE FILES
-# ===================================================================
+# ── DENY ACCESS TO SENSITIVE FILES ───────────────────────────────
 <IfModule mod_authz_core.c>
-    # Deny access ke .env
+    # .env files
     <FilesMatch "^\.env">
         Require all denied
     </FilesMatch>
 
-    # Deny backup / temp files
-    <FilesMatch "\.(bak|backup|old|tmp)$">
+    # Hidden files (dotfiles)
+    <FilesMatch "^\.">
         Require all denied
     </FilesMatch>
 
-    # Deny composer files
-    <FilesMatch "^(composer\.json|composer\.lock)$">
+    # Backup & temp files
+    <FilesMatch "\.(bak|backup|old|tmp|swp|swo|dist|orig|save)$">
         Require all denied
     </FilesMatch>
 
-    # Deny PHP config files
-    <FilesMatch "^(php\.ini|\.user\.ini)$">
+    # Composer files
+    <FilesMatch "^(composer\.(json|lock))$">
+        Require all denied
+    </FilesMatch>
+
+    # PHP config files
+    <FilesMatch "^(php\.ini|\.user\.ini|\.htpasswd)$">
+        Require all denied
+    </FilesMatch>
+
+    # Build/deploy scripts (harus dihapus setelah install)
+    <FilesMatch "^(install\.php|deploy-check\.php|phpinfo\.php)$">
+        Require all denied
+    </FilesMatch>
+
+    # SQL schema
+    <FilesMatch "^schema\.sql$">
         Require all denied
     </FilesMatch>
 </IfModule>
+
+# Fallback untuk Apache < 2.4
+<IfModule !mod_authz_core.c>
+    <FilesMatch "^\.">
+        Order deny,allow
+        Deny from all
+    </FilesMatch>
+</IfModule>
+
+# ── ERROR DOCUMENTS ──────────────────────────────────────────────
+ErrorDocument 403 "403 Forbidden"
+ErrorDocument 404 "404 Not Found"
+ErrorDocument 500 "500 Internal Server Error"

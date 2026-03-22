@@ -1,102 +1,36 @@
 # ===================================================================
-# SRP Web Application Configuration
+# SRP v2.1 — Root .htaccess (di luar public_html)
+# ===================================================================
+# Taruh file ini di ROOT PROJECT (parent dari public_html/).
+# Jika document root = public_html/, file ini opsional.
+# Jika document root = project root, RENAME jadi .htaccess
 # ===================================================================
 
-# Basic options
+# Blok directory listing
 Options -Indexes
 Options -MultiViews
 
-# Root "/" pakai index.php
-DirectoryIndex index.php
-
 # ===================================================================
-# ENVIRONMENT VARIABLES
+# DENY ALL — root project tidak boleh diakses via web
 # ===================================================================
-<IfModule mod_env.c>
-    SetEnv SRP_API_URL "https://trackng.us/decision.php"
-    SetEnv SRP_API_KEY "6a6964658b009bc92d359e0d5e7b85957e78e1fddbabf456b469da5df65bebf79"
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order deny,allow
+    Deny from all
 </IfModule>
 
 # ===================================================================
-# SECURITY & CACHING HEADERS
-# ===================================================================
-<IfModule mod_headers.c>
-    # Security headers
-    Header always set X-Frame-Options "DENY"
-    Header always set X-Content-Type-Options "nosniff"
-    Header always set X-XSS-Protection "1; mode=block"
-    Header always set Referrer-Policy "strict-origin-when-cross-origin"
-
-    # Disable caching untuk PHP (dinamis)
-    <FilesMatch "\.(php)$">
-        Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
-        Header set Pragma "no-cache"
-    </FilesMatch>
-
-    # Cache statis 1 tahun
-    <FilesMatch "\.(jpe?g|png|gif|ico|css|js|woff2?|ttf|svg)$">
-        Header set Cache-Control "max-age=31536000, public"
-    </FilesMatch>
-</IfModule>
-
-# ===================================================================
-# COMPRESSION
-# ===================================================================
-<IfModule mod_deflate.c>
-    AddOutputFilterByType DEFLATE \
-        text/html text/plain text/xml text/css text/javascript \
-        application/javascript application/json
-</IfModule>
-
-# ===================================================================
-# URL REWRITING / ROUTING
+# KECUALI public_html/ — redirect ke sana
 # ===================================================================
 <IfModule mod_rewrite.c>
     RewriteEngine On
-    RewriteBase /
 
-    # Blok akses VCS & src (Directory* gak boleh di .htaccess)
-    RewriteRule ^(?:\.git|\.svn)/ - [F,L]
-    RewriteRule ^src/ - [F,L]
+    # Jika request ke root, forward ke public_html/
+    RewriteRule ^$ public_html/index.php [L]
 
-    # Short URL: /l/campaignname → landing.php?user_lp=campaignname
-    RewriteRule ^l/([a-zA-Z0-9_-]+)$ landing.php?user_lp=$1 [L,QSA]
-
-    # Root "/" → index.php (redundant dgn DirectoryIndex, tapi eksplisit)
-    RewriteRule ^$ index.php [L,QSA]
-
-    # "/login" → login.php
-    RewriteRule ^login/?$ login.php [L,QSA]
-
-    # "/landing" → landing.php
-    RewriteRule ^landing/?$ landing.php [L,QSA]
-
-    # Serve file/direktori asli apa adanya
-    RewriteCond %{REQUEST_FILENAME} -f [OR]
-    RewriteCond %{REQUEST_FILENAME} -d
-    RewriteRule ^ - [L]
-
-    # (Opsional) front controller:
-    # Semua URL lain tembak ke index.php
-    #RewriteRule ^(.+)$ index.php [L,QSA]
-</IfModule>
-
-# ===================================================================
-# DENY ACCESS TO SENSITIVE FILES
-# ===================================================================
-<IfModule mod_authz_core.c>
-    # Deny access ke .env
-    <FilesMatch "^\.env">
-        Require all denied
-    </FilesMatch>
-
-    # Deny backup / temp files
-    <FilesMatch "\.(bak|backup|old|tmp)$">
-        Require all denied
-    </FilesMatch>
-
-    # Deny composer files
-    <FilesMatch "^(composer\.json|composer\.lock)$">
-        Require all denied
-    </FilesMatch>
+    # Forward semua request ke public_html/
+    RewriteCond %{REQUEST_URI} !^/public_html/
+    RewriteRule ^(.*)$ public_html/$1 [L]
 </IfModule>
