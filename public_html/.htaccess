@@ -201,8 +201,8 @@ DirectoryIndex index.php
         Require all denied
     </FilesMatch>
 
-    # Build/deploy scripts (harus dihapus setelah install)
-    <FilesMatch "^(install\.php|deploy-check\.php|phpinfo\.php)$">
+    # Build/deploy scripts (hapus manual setelah install selesai)
+    <FilesMatch "^(deploy-check\.php|phpinfo\.php)$">
         Require all denied
     </FilesMatch>
 
