@@ -38,6 +38,7 @@ $includes = [
     '.env.example',
     '.env.entry.example',
     '.htaccess.example',
+    '.htaccess.entry.example',
 
     // Installer
     'install.sh',
@@ -81,8 +82,8 @@ $excludes = [
     'Thumbs.db',
     'desktop.ini',
 
-    // Generated htaccess (user generates via install.sh)
-    'public_html/.htaccess',
+    // Note: public_html/.htaccess IS included in the build
+    // (production-ready, no secrets)
 ];
 
 // ── Helper Functions ────────────────────────────────────────────
